@@ -16,7 +16,7 @@ _CMDS = [
     Command('branches',              'List all cross-component branches.'),
     Command('components',            'List all components.'),
     Command('graft component branch','Graft component into an existing branch.'),
-    Command('flow branch action',    'Run git flow on all components in a branch.'),
+    Command('flow action',           'Run git flow on all components.'),
     Command('retire branch',         'Remove a feature branch from active use.'),
     Command('revive branch',         'Put a feature branch back into active use.'),
     Command('rename branch',         'Change the name of an existing feature branch.'),

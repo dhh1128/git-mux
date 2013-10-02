@@ -15,14 +15,16 @@ def _get_data(args, i, prompt, lst):
         return ui.prompt(prompt)        
 
 def branches(*args):
-    eng = engine.get()
-    for b in eng.get_branches():
-        writec(b['name'] + LINENUM_COLOR + ' (%s)\n' % b['status'], PARAM_COLOR)
+    by_branch_name = engine.get().get_branches().by_branch_name
+    branch_names = sorted(by_branch_name.keys())
+    for branch_name in branch_names:
+        component_names = sorted(by_branch_name[branch_name])
+        writec(branch_name.ljust(20) + LINENUM_COLOR + ' (%s)\n' % ', '.join(component_names), PARAM_COLOR)
 
 def components(*args):
     eng = engine.get()
     for b in eng.get_components():
-        writec(b['name'] + LINENUM_COLOR + ' (%s)\n' % b['url'], PARAM_COLOR)
+        writec(b['name'].ljust(20) + LINENUM_COLOR + ' (%s)\n' % b['url'], PARAM_COLOR)
         
 def graft(*args):
     eng = engine.get()
@@ -42,19 +44,7 @@ def graft(*args):
     print('Grafted %s into %s.' % (component, branch))
 
 def flow(*args):
-    eng = engine.get()
-    if args:
-        branch = args[0]
-        args = args[1:]
-    else:
-        branch = _get_data(args, 0, 'Branch to flow?', eng.get_branches())
-        if not branch:
-            return
-    if not args:
-        args = ui.prompt('Args to git flow?')
-        if not args:
-            return
-    eng.flow(branch, args)
+    engine.get().flow(*args)
     
 def retire(*args):
     eng = engine.get()

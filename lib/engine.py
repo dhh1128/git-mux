@@ -1,19 +1,27 @@
-import os, json, time, sys, fcntl
+import os, json, time, sys, fcntl, re, inspect
 
 import constants
+from colors import *
+from ansi import *
 
-_DATA_REPO = 'springville:/home/dhardman/gitrepos/git-mux-data.git'
+_DATA_REPO = 'springville:/home/dhardman/git-server-repos/git-mux-data.git'
 _LOCAL_DATA_REPO = os.path.join(constants.HOMEDIR, '.git-mux-data')
+_REPO_ROOT = os.path.join(constants.HOMEDIR, 'git-mux-cache')
 _PROTECTED_BRANCHES = ['master', 'develop']
 _BRANCHES_FILE = 'branches.json'
 _COMPONENTS_FILE = 'components.json'
+_SUPPRESS_GITFLOW_LINE_PAT = re.compile(r'^ +(init|version|support) +.*?\n', re.MULTILINE)
+_VALID_BRANCH_TYPES_PAT = re.compile('^(?:feature|release|hotfix)$')
+_VALID_BRANCH_NAMES_PAT = re.compile('[a-z]+(?:[-a-z]*[a-z])?$')
+_SCRATCH_BRANCH_NAME = 'scratch'
 
 try:
     import git as gitpython
 except:
     eprintc('Unable to import git support module. Please run "sudo easy_install gitpython" and retry.')
-    
+
 class Engine:
+
     def __init__(self, folder=None):
         if folder is None:
             folder = _LOCAL_DATA_REPO
@@ -44,6 +52,13 @@ class Engine:
             except:
                 raise Exception('Unable to pull latest 3po data into %s. %s.' % (self._folder, sys.exc_info()[1]))
 
+    def _find_component_by_name(self, name):
+        which = [x for x in self.get_components() if x['name'] == name]
+        if not which:
+            raise Exception('Component "%s" is not recognized.' % (object_type, name))
+        assert len(which) == 1
+        return which[0]
+
     def _read_json(self, fname):
         self._update_local_data_repo()
         try:
@@ -55,12 +70,49 @@ class Engine:
         except:
             raise Exception('Could not parse %s. %s.' % (path, sys.exc_info()[1]))
 
+    # Define a class that holds branches indexed 2 ways -- by branch name,
+    # and by the name of the component that has the branch.
+    class Branches:
+        def __init__(self):
+            self.by_component_name = {}
+            self.by_branch_name = {}
+        def add(self, branch_name, component_name):
+            if component_name not in self.by_component_name:
+                self.by_component_name[component_name] = []
+            self.by_component_name[component_name].append(branch_name)
+            if branch_name not in self.by_branch_name:
+                self.by_branch_name[branch_name] = []
+            self.by_branch_name[branch_name].append(component_name)
+
     def get_branches(self, filter_func=None):
         if self._branches is None:
-            self._branches = self._read_json(_BRANCHES_FILE)
-            self._branches.sort(key=lambda x: x['name'])
-        if filter_func:
-            return [b for b in self._branches if filter_func(b)]
+
+            b = Engine.Branches()
+            for c in self.get_components():
+                component_name = c['name']
+                git = self._get_component_git(c['name'])
+                stdout = git.branch()
+                items = [x.strip() for x in stdout.strip().split('\n')]
+                scratch_found = False
+                for item in items:
+                    if item.startswith('*'):
+                        item = item[1:].lstrip()
+                    if item == _SCRATCH_BRANCH_NAME:
+                        scratch_found = True
+                    else:
+                        b.add(item, component_name)
+                # As a precaution, we create a local branch named "scratch"
+                # in our git-mux-cache version of each component. This branch
+                # has no remote and is not based on anything. We leave
+                # this as the active branch after all our operations, in
+                # case our code misbehaves or someone accidentally issues a
+                # direct git command without carefully setting up context.
+                if not scratch_found:
+                    git.branch(_SCRATCH_BRANCH_NAME)
+                git.checkout(_SCRATCH_BRANCH_NAME)
+
+            self._branches = b
+
         return self._branches
 
     def get_components(self):
@@ -68,17 +120,177 @@ class Engine:
             self._components = self._read_json(_COMPONENTS_FILE)
             self._components.sort(key=lambda x: x['name'])
         return self._components
-    
+
     def add_component_to_branch(self, component, branch):
         _find_by_name(self.get_components(), component, 'Component')
         _find_by_name(self.get_branches(), branch, 'Branch')
         print('to do: finish stub')
 
-    def flow(self, branch, args):
-        _find_by_name(self.get_branches(), branch, 'Branch')
-        print('git flow %s' % args)
-        print('to do: finish stub')
-        
+    def _get_component_git(self, name):
+        path = os.path.join(_REPO_ROOT, name)
+        if not os.path.isdir(path):
+            component = self._find_component_by_name(name)
+            sys.stderr.write('Fetching %s repo for the first time...\n' % name)
+            os.makedirs(path)
+            git = gitpython.Git(path)
+            if False:
+                # We start out mirroring the remote repo because we want to pick up
+                # all the branches it has. This implies --bare. However, we can't
+                # use git flow on a bare repo, so we do a little black magic here.
+                # Instead of going to the raw folder, we clone into a .git folder,
+                # and then we undo its "bareness". Lastly, we undo the mirroring.
+                # This allows us to call git flow on the result.
+                git.clone(component['url'], '.git', '--mirror')
+                git.config('--bool', 'core.bare', 'false')
+                git.config('--bool', 'remote.origin.mirror', 'false')
+                git.flow('init', '-d')
+                git.config('branch.develop.remote', 'origin/develop')
+                git.config('branch.master.remote', 'origin/master')
+            else:
+                git.clone(component['url'], '.')
+                git.flow('init', '-d')
+                # git flow assumes you'll have only local copies of feature
+                # branches. We want to link ours to what's on the remote...
+                remote_branches = [x.strip() for x in git.branch('-a').strip().split('\n')]
+                remote_branches = [x[15:] for x in remote_branches if x.startswith('remotes/origin/') and '/' in x]
+                remote_branches = [x for x in remote_branches if _VALID_BRANCH_TYPES_PAT.match(x[0:x.find('/')])]
+                for rb in remote_branches:
+                    git.checkout('-b', rb, 'origin/%s' % rb)
+
+            git.branch(_SCRATCH_BRANCH_NAME)
+        else:
+            git = gitpython.Git(path)
+        return git
+
+    def _flow_list(self, state, component_name, git, *args):
+        exit_code, stdout, stderr = git.flow(*args, with_extended_output=True, with_exceptions=False)
+        return exit_code, stdout, stderr
+
+    def _flow_start(self, state, component_name, git, *args):
+        named_args, branch_type, branch_name, full_branch_name = _parse_flow_args(*args)
+
+        if state.i == 0:
+            if not _VALID_BRANCH_NAMES_PAT.match(branch_name):
+                raise Exception('Branch names must consist entirely of lower-case letters and hyphens; "%s" is invalid.' % branch_name)
+            state.components_with_branch = self.get_branches().by_branch_name.get(full_branch_name)
+            if not state.components_with_branch:
+                state.components_with_branch = []
+
+        if component_name in state.components_with_branch:
+            exit_code, stdout, stderr = None, 'Branch %s already started.' % full_branch_name, None
+        else:
+            exit_code, stdout, stderr = git.flow(*args, with_extended_output=True, with_exceptions=False)
+            if not exit_code:
+                stdout = 'Branch %s started.' % full_branch_name
+                self.get_branches().add(full_branch_name, component_name)
+
+        # Make sure remote repo has this same branch.
+        git.push('--set-upstream', 'origin', full_branch_name)
+
+        return exit_code, stdout, stderr
+
+    def _prep_for_existing_branch(self, state, *args):
+        # Map args to "git flow" into variables. Remember them.
+        state.named_args, state.branch_type, state.branch_name, state.full_branch_name = _parse_flow_args(*args)
+
+        # Validate some input.
+        branches = self.get_branches()
+        if not state.full_branch_name in branches.by_branch_name:
+            raise Exception('Branch "%s" is not recognized.' % full_branch_name)
+
+        # See which components use this branch.
+        if state.i == 0:
+            state.components_with_branch = branches.by_branch_name.get(state.full_branch_name)
+            if not state.components_with_branch:
+                state.components_with_branch = []
+
+    def _flow_finish(self, state, component_name, git, *args):
+        self._prep_for_existing_branch(state, *args)
+
+        if component_name in state.components_with_branch:
+            # Switch to the correct branch and run git flow's finish.
+            git.checkout(state.full_branch_name)
+            exit_code, stdout, stderr = git.flow(*args, with_extended_output=True, with_exceptions=False)
+            if not exit_code:
+                stdout = 'Branch %s finished.' % state.full_branch_name
+                # At this point, we've merged the feature branch into local's copy of "develop",
+                # and we've deleted the feature branch locally. We now need to delete the remote
+                # version as well, and then push local develop to remote.
+                # Git's quirky way to delete a remote branch is to push <nothing> (the empty string)
+                # to the branch you want to delete on origin...
+                git.push('origin', ':%s' % state.full_branch_name)
+                git.push() # Active branch = "develop"; push that as well.
+            return exit_code, stdout, stderr
+        else:
+            return None, None, None
+
+    def _flow_pull(self, state, component_name, git, *args):
+        self._prep_for_existing_branch(state, *args)
+
+        if component_name in state.components_with_branch:
+            git.checkout(state.full_branch_name)
+            exit_code, stdout, stderr = git.pull(with_extended_output=True)
+            return exit_code, stdout, stderr
+
+    def _flow_push(self, state, component_name, git, *args):
+        self._prep_for_existing_branch(state, *args)
+
+        if component_name in state.components_with_branch:
+            git.checkout(state.full_branch_name)
+            exit_code, stdout, stderr = git.push(with_extended_output=True)
+            return exit_code, stdout, stderr
+
+    def flow(self, *args):
+
+        if not args:
+            args = ['help']
+
+        if args[-1] == 'help':
+            git = gitpython.Git()
+            x = git.flow(*args, as_process=True)
+            stdout, stderr = x.proc.communicate()
+            stdout = stdout.replace('git flow', 'git mux flow')
+            stdout = _SUPPRESS_GITFLOW_LINE_PAT.sub('', stdout)
+            print(stdout)
+            return
+
+        first = args[0]
+        if first == 'version':
+            print('unknown')
+            return
+        elif first == 'init':
+            raise Exception("Can't mux an init across components; init is inherently a single-component operation.")
+        else:
+            if not _VALID_BRANCH_TYPES_PAT.match(first):
+                raise Exception("Can't handle \"%s\" branches right now." % first)
+            verb = args[1]
+            func = getattr(self, '_flow_' + verb)
+
+            class State:
+                def __init__(self):
+                    self.i = 0
+
+            state = State()
+            for c in self.get_components():
+                component_name = c['name']
+                line_width = 30 - len(component_name)
+                printc('\n' + PARAM_COLOR + component_name + DELIM_COLOR + ' ' + '-'*line_width + NORMTXT)
+                git = self._get_component_git(component_name)
+                try:
+                    result = func(state, component_name, git, *args)
+                    if result:
+                        exit_code, stdout, stderr = result
+                        if exit_code:
+                            if not stderr:
+                                stderr = 'git flow command failed'
+                            eprintc(stderr, ERROR_COLOR)
+                        elif stdout:
+                            print(stdout)
+                    state.i += 1
+                finally:
+                    # For safety, always reset to scratch branch.
+                    git.checkout(_SCRATCH_BRANCH_NAME)
+
     def _update_file(self, fname, object_for_json, msg):
         txt = json.dumps(object_for_json, indent=2, separators=(',', ': '))
         path = os.path.join(self._folder, fname)
@@ -87,7 +299,7 @@ class Engine:
         self._git.add(path)
         self._git.commit('-m', msg)
         self._git.push()
-        
+
     def retire(self, branch):
         which = _find_by_name(self.get_branches(), branch, 'Branch')
         if branch in [b['name'] for b in self.get_branches(lambda b: b['name'] in _PROTECTED_BRANCHES)]:
@@ -97,7 +309,7 @@ class Engine:
         which['status'] = 'retired'
         with EngineLock():
             self._update_file(_BRANCHES_FILE, self._branches, 'retire %s branch' % branch)
-     
+
     def revive(self, branch):
         which = _find_by_name(self.get_branches(), branch, 'Branch')
         if branch not in [b['name'] for b in self.get_branches(lambda b: b['status'] == 'retired')]:
@@ -106,19 +318,20 @@ class Engine:
         with EngineLock():
             self._update_file(_BRANCHES_FILE, self._branches, 'revive %s branch' % branch)
 
+def _parse_flow_args(*args):
+    named_args = [arg for arg in args if not arg.startswith('-')]
+    branch_type = named_args[0]
+    # Require an explicitly named branch.
+    branch_name = named_args[2]
+    full_branch_name = '%s/%s' % (branch_type, branch_name)
+    return named_args, branch_type, branch_name, full_branch_name
+
 _engine = None
 def get():
     global _engine
     if _engine is None:
         _engine = Engine()
     return _engine
-
-def _find_by_name(lst, name, object_type):
-    which = [x for x in lst if x['name'] == name]
-    if not which:
-        raise Exception('%s "%s" is not recognized.' % (object_type, name))
-    assert len(which) == 1
-    return which[0]
 
 class _NamedSemaphore:
     # Python's multiprocess.Lock() class ought to be what we want here--
@@ -134,7 +347,7 @@ class _NamedSemaphore:
     def release(self):
         fcntl.flock(self.handle, fcntl.LOCK_UN)
         self.handle.close()
-    
+
 class EngineLock:
     # Allow _NamedSemaphore to be used in python's "with" block.
     def __init__(self, path=None):
@@ -144,5 +357,5 @@ class EngineLock:
     def __enter__(self):
         self.semaphore.acquire()
     def __exit__(self, type, value, traceback):
-        self.semaphore.release()        
-    
+        self.semaphore.release()
+
