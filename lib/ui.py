@@ -39,11 +39,14 @@ _LEN_SEQ = len(_SEQ)
 
 TITLE_COLOR = GREEN
 DELIM_COLOR = LIGHT_GRAY
-LINENUM_COLOR = DARK_GRAY
 CMD_COLOR = GREEN
 PARAM_COLOR = YELLOW
-ERROR_COLOR = RED
+ERROR_COLOR = BOLD_RED
 WARNING_COLOR = BOLD_YELLOW
+STEP_COLOR = BOLD_GREEN
+SUCCESS_COLOR = WHITE
+SUBTLE_COLOR = DARK_GRAY
+PROMPT_COLOR = BOLD_CYAN
 
 MENU = ''
 for c in cmd.commands():
@@ -69,17 +72,16 @@ def prompt(msg, choices=None, default='', normfunc=None, readline=None):
            Normally this is sys.stdin.readline, but it can also be
            readline_masked() if prompting for a password.
     '''
-    txt = msg
+    txt = PROMPT_COLOR + msg + NORMTXT + ' (' + PARAM_COLOR
     show_default = not (default is None) and not (default == '')
     if choices:
         if show_default:
-            txt += ' (%s; =%s)' % (choices, str(default))
+            txt += '%s; =%s' % (choices, str(default))
         else:
-            txt += ' (%s)' % choices
+            txt += '%s' % choices
     elif show_default:
-        txt += ' ( =%s)' % str(default)
-
-    txt += ' '
+        txt += ' =%s' % str(default)
+    txt += NORMTXT + ') ' + PARAM_COLOR
 
     # We can't bind this value in the function prototype, because then it would
     # be bound once, forever. In that case any attempt to override/redirect
@@ -87,16 +89,20 @@ def prompt(msg, choices=None, default='', normfunc=None, readline=None):
     if readline is None:
         readline = sys.stdin.readline
 
-    while True:
-        sys.stdout.write(txt)
-        answer = readline().rstrip()
-        if normfunc:
-            answer = normfunc(answer)
-        if not answer:
-            if default is None:
-                continue
-            answer = default
-        return answer
+    try:
+        while True:
+            writec(txt)
+            answer = readline().rstrip()
+            if normfunc:
+                answer = normfunc(answer)
+            if not answer:
+                if default is None:
+                    continue
+                answer = default
+            return answer
+    finally:
+        # Always reset color on exit.
+        writec(NORMTXT)
 
 def prompt_bool(msg, default=None):
     '''

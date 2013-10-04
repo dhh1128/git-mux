@@ -1,4 +1,4 @@
-import os, subprocess, time, traceback, sys
+import os, subprocess, time, traceback, sys, re, ConfigParser
 
 from lib import ui, config
 
@@ -24,7 +24,7 @@ Installation instructions:
 '''
 
 def report_step(step):
-    ui.printc('\n%s...' % step, ui.PARAM_COLOR)
+    ui.printc('\n%s...' % step, ui.STEP_COLOR)
 
 def complain(problem):
     ui.eprintc(problem, ui.ERROR_COLOR)
@@ -85,7 +85,7 @@ def do(cmd, as_user=None):
     if as_user:
         if os.getegid() == 0:
             cmd = 'su %s -c "%s"' % (as_user, cmd.replace('"', '\\"'))
-    print(cmd)
+    ui.printc(cmd, ui.SUBTLE_COLOR)
     proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, shell=True)
     stdout, stderr = proc.communicate()
     return proc.returncode, stdout, stderr
@@ -174,16 +174,185 @@ def setup_git_flow(audit_only=False):
         print('git-flow is installed')
     return 0
 
-def setup_data():
-    data_path = os.path.join(config.GMUX_ROOT, 'git-mux-data')
-    git = None
-    if not os.path.isdir(data_path):
-        os.makedirs()
-        git = gitpython.Git(data_path)
+def get_shared_cfg_repo_from_code_repo(code_repo):
+    return code_repo[0:code_repo.rfind('/') + 1] + '%s-shared-cfg.git' % config.APP_NAME
+
+_code_remote = None
+def get_code_remote():
+    global _code_remote
+    if _code_remote is None:
+        with WorkingDir(config.BIN_FOLDER):
+            remotes = do_or_die('git remote -v', as_user=get_non_root_user()).strip().split('\n')
+            _code_remote = re.split('\s+', remotes[0])[1]
+    return _code_remote
+
+def remote_to_local(repo):
+    local = repo[repo.rfind('/') + 1:]
+    if local.endswith('.git'):
+        local = local[0:-4]
+    return local
+
+def define_branches(nru):
+    report_step('define branches')
+    print('''Large software engineering teams may have many active branches, but only a few
+may be interesting to any given branch maintainer. By default, %s will operate
+on master, develop, and any git-flow branches that you create on this machine.
+It doesn't pull down extra branches unless you say to do so, because this
+wastes disk space and slows down maintenance. However, if you'd like to manage
+branches that someone created elsewhere, just add them here. For example:
+
+  feature/fancy-dashboard, hotfix/acme-corp -- adds 2 branches of interest.
+
+You may also use the keyword "all" to manage all git-flow style branches, or
+"mine" for just ones you create in the future.
+''' % config.APP_NAME)
+    cfg = config.cfg
+    muxed_branches = cfg.try_get(SECTION, KEY, 'mine')
+    while True:
+        # Prompt. Then apply various filters and see if user gave us anything usable.
+        selected = ui.prompt('Branches to manage -- "mine", "all", or list?', default=muxed_branches)
+        if selected:
+            selected = [x.strip() for x in selected.split(',')]
+            selected = [x for x in selected if x not in ['master', 'develop']]
+            if selected:
+                non_gitflow = [x for x in selected if x.find('/') == -1 and x != 'mine' and x != 'all']
+                if non_gitflow:
+                    ui.eprintc('Only git-flow branches are muxable; %s not supported.' % ', '.join(non_gitflow), ui.ERROR_COLOR)
+                else:
+                    break
+
+    if 'all' in selected:
+        selected = 'all'
+    elif 'mine' in selected and len(selected) == 1:
+        selected = 'mine'
+    cfg.set_all(SECTION, KEY, selected)
+
+def define_components(nru):
+    report_step('define components')
+    try_initial_fetch = False
+
+    # Figure out where data ought to reside, remotely and locally.
+    data_folder = os.path.join(config.GMUX_ROOT, 'data')
+    default_shared_cfg_repo = get_shared_cfg_repo_from_code_repo(get_code_remote())
+
+    cfg = config.cfg
+    SECTION = 'misc'
+    KEY = 'shared cfg repo'
+    shared_cfg_repo = cfg.get(SECTION, KEY, default_shared_cfg_repo)
+    local_shared_cfg_folder = os.path.join(data_folder, config.SHARED_CFG_REPO_NAME)
+
+    if not os.path.isdir(data_folder):
+        do_or_die('mkdir -p %s' % data_folder, as_user=nru)
+
+    repeat = True
+    while repeat:
+        repeat = False
+        shared_cfg_repo = ui.prompt('Repo where components are defined, or "none"?', default=shared_cfg_repo)
+        cfg.set_all('misc', 'shared cfg repo', shared_cfg_repo)
+        if shared_cfg_repo.lower() != 'none':
+            if os.path.isdir(os.path.join(local_shared_cfg_folder, '.git')):
+                with WorkingDir(local_shared_cfg_folder):
+                    do_or_die('git pull', as_user=nru)
+            else:
+                # Can't clone into a non-empty folder. Make sure we don't have
+                # that case.
+                if os.path.isdir(local_shared_cfg_folder):
+                    if os.listdir(local_shared_cfg_folder):
+                        die('%s is not empty; unsafe to store git clone. Clean out and retry.' % local_shared_cfg_folder)
+                    os.rmdir(local_shared_cfg_folder)
+
+                with WorkingDir(data_folder):
+                    exit_code, stdout, stderr = do('git clone %s %s' % (shared_cfg_repo, config.SHARED_CFG_REPO_NAME), as_user=nru)
+                    if exit_code:
+                        stderr = re.sub('\n{2,}', '\n', stderr.strip())
+                        ui.eprintc('Unable to clone %s.\n%s' % (shared_cfg_repo, stderr), ui.ERROR_COLOR)
+                        repeat = True
+
+    # Now ask the user which components they want to work with.
+    muxed = ''
+    SECTION = 'muxed components'
+    if cfg.has_section(SECTION):
+        muxed_items = cfg.items(SECTION)
+        if muxed_items:
+            muxed = ', '.join([pair[0] for pair in muxed_items])
     else:
-        os.path.join(data_path, '.git')
-        
-def update_app():
+        muxed_items = []
+
+    defined = muxed
+    defined_items = []
+    if shared_cfg_repo:
+        components_file = os.path.join(local_shared_cfg_folder, 'components.config')
+        if os.path.isfile(components_file):
+            cfg2 = ConfigParser.SafeConfigParser()
+            cfg2.read(components_file)
+            SECTION2 = 'defined components'
+            if cfg2.has_section(SECTION2)
+            defined_items = cfg2.items(SECTION2)
+            if defined_items:
+                defined += ', '.join([pair[0] for pair in defined_items])
+    defined_names = [x[0] for x in defined_items]
+
+    if defined:
+        print('\nThe following components are defined:')
+        for item in defined_items:
+            ui.printc('  ' + ui.PARAM_COLOR + item[0] + ui.NORMTXT + ' = ' + item[1])
+    else:
+        print('\nNo components are defined.')
+
+    if muxed:
+        sys.stdout.write('\nThe following components are currently muxed:\n  ')
+        ui.printc(', '.join([item[0] for item in muxed_items]), ui.PARAM_COLOR)
+    else:
+        print('\nNo components are currently muxed.')
+        # If they haven't yet chosen any list, assume they'll want to pick everything.
+        muxed = defined
+    print('''
+In ordinary use, %s muxes (or multiplexes) commands across a set of
+components (git repos) to make branch management consistent and easy when
+pieces of a stack or suite need the same feature/hotfix/release branch. The
+list of muxed components governs the scope of operations. You can edit the
+names in the component list, and define new components by adding items
+in the form "name=url".
+''' % config.APP_NAME)
+
+    selected = []
+    while True:
+        selected = [x.strip() for x in ui.prompt('List of components to mux?', default=muxed).split(',')]
+        unrecognized = [x.strip() for x in selected if x.find('=') == -1 and x not in defined_names]
+        if unrecognized:
+            ui.eprintc('Unrecognized components: %s' % ', '.join(unrecognized), ui.ERROR_COLOR)
+        else:
+            if selected:
+                for item in selected:
+                    pair = None
+                    i = item.find('=')
+                    if i > -1:
+                        pair = item[0:i].rstrip(), item[i+1:].lstrip()
+                    else:
+                        for x in defined_items:
+                            if x[0] == item:
+                                pair = x
+                                break
+                    assert(pair)
+                    cfg.set_all(SECTION, pair[0], pair[1])
+                break
+            else:
+                ui.eprintc('You must define some components to mux across.', ui.ERROR_COLOR)
+
+class WorkingDir:
+    '''
+    A class that changes directory for the duration of a Python "with" statement.
+    '''
+    def __init__(self, path):
+        self.path = os.path.abspath(path)
+        self.restore_path = os.getcwd()
+    def __enter__(self):
+        os.chdir(self.path)
+        return self
+    def __exit__(self, type, value, traceback):
+        os.chdir(self.restore_path)
+
+def update_app(nru):
     report_step('check for out-of-date %s' % config.APP_NAME)
     import git as gitpython
     git = gitpython.Git(config.BIN_FOLDER)
@@ -194,57 +363,69 @@ def update_app():
     else:
         if stdout.find('ahead of origin') > -1:
             ui.eprintc('Reminder: you have changes to %s that need to be pushed.' % config.APP_NAME, ui.WARNING_COLOR)
-        # Safe to pull.
-        stdout = git.pull()
-        if stdout.find('lready up-to-date') == -1:
-            print(stdout)
-            die('%s was out of date; re-run setup with new version.' % config.APP_NAME)
+        # Safe to pull. Can't use "git pull" here because we're running as root and
+        # we want to pull as normal user.
+        with WorkingDir(config.BIN_FOLDER):
+            exit_code, stdout, stderr = do('git pull', as_user=nru)
+            if stdout.find('lready up-to-date') == -1:
+                print(stdout)
+                die('%s was out of date; re-run setup with new version.' % config.APP_NAME)
     print('no remote changes to worry about')
 
 def run(audit_only=False):
     exit_code = 0
     try:
         # Check basic prerequisites, and fix them if appropriate.
-        
+
         # Verify correct security context.
         as_root = os.getegid() == 0
         if as_root:
+            # This call will cause us to exit if we have problems.
             nru = get_non_root_user()
         else:
             if audit_only:
                 exit_code += check_ownership(report=True)
             else:
                 die('Must run setup as root user.')
-            
+
         exit_code += setup_git(audit_only)
-        
+
         # Only check gitpython and git-flow if git's working.
         if not exit_code:
             exit_code += setup_git_python(audit_only)
             exit_code += setup_git_flow(audit_only)
-            
+
         exit_code += setup_folder_layout(audit_only)
         exit_code += setup_app_cloned(audit_only)
-        
+
         if not audit_only:
+
             # We need to do the rest of the setup as the unprivileged user
-            # instead of as root.
-            if update_app():
-                pass
-            
+            # instead of as root. But we need to have a config file that's
+            # owned by the non-root user.
+            if not os.path.isdir(config.CONFIG_FOLDER):
+                do_or_die('mkdir -p %s' % config.CONFIG_FOLDER, as_user=nru)
+            if not os.path.isfile(config.CONFIG_FQPATH):
+                do_or_die('touch %s' % config.CONFIG_FQPATH, as_user=nru)
+
+            update_app(nru)
+            define_components()
+            define_branches()
+            config.cfg.save()
+
         # Summarize what happened.
         operation = 'Setup'
         if audit_only:
             operation = 'Setup audit'
-        outcome = 'succeeded'
         if exit_code:
-            outcome = 'failed'
-        print('\n%s %s.\n' % (operation, outcome))
+            ui.eprintc('\n%s failed.\n' % operation, ui.ERROR_COLOR)
+        else:
+            ui.eprintc('\n%s succeeded.\n' % operation, ui.SUCCESS_COLOR)
 
         return exit_code
-    
+
     except KeyboardInterrupt:
-        ui.eprintc('\nSetup interrupted.\n', WARNING_COLOR)
+        ui.eprintc('\nSetup interrupted.\n', ui.ERROR_COLOR)
         pass
     except SystemExit:
         pass
@@ -262,7 +443,7 @@ if __name__ == '__main__':
                 audit = True
             else:
                 show_help = True
-                
+
     # Take care of "help" mode inline.
     if show_help:
         print('''
@@ -270,5 +451,5 @@ sudo python setup.py   -- run setup
 python setup.py audit  -- verify that setup is correct
 ''')
         sys.exit(0)
-        
+
     sys.exit(run(audit_only=audit))
