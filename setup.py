@@ -186,7 +186,10 @@ def setup_data():
 def update_app():
     git = gitpython.Git(config.BIN_FOLDER)
     exit_code, stdout, stderr = git.pull()
-    if exit_code or stdout.find('Unpacking objects') > -1:
+    stdout += stderr
+    if exit_code or stderr:
+        die(stdout)
+    elif stdout.find('Unpacking objects') > -1:
         die('%s was out of date. Re-run setup with new version.' % config.APP_NAME)
 
 def run(audit_only=False):
