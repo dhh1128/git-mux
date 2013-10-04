@@ -13,20 +13,14 @@ class Command:
         return self.verb
 
 _CMDS = [
-    Command('branches',              'List all cross-component branches.'),
-    Command('components',            'List all components.'),
-    Command('graft component branch','Graft component into an existing branch.'),
-    Command('flow action',           'Run git flow on all components.'),
-    Command('retire branch',         'Remove a feature branch from active use.'),
-    Command('revive branch',         'Put a feature branch back into active use.'),
-    Command('rename branch',         'Change the name of an existing feature branch.'),
-    Command('pull',                    'Pull all changes into this branch.'),
-    Command('push',                    'Push all changes from this branch.'),
-    Command('list',                    'List active feature branches.'),
-    Command('setup',                   'Setup or verify correct environment.'),
-    Command('update',                  'Apply latest patches to this tool.'),
-    Command('version',                 'Display 3po version.'),
-    Command('where',                   'Tell where 3po is installed.'),
+    Command('list [all] b|c',        'List muxed (or all) branches/components.'),
+    Command('refresh',               'Discover new remote meta data.'),
+    Command('flow type action name', 'Run git flow on my components.'),
+    Command('include b|c name',      'Add branch/component to those I\'m muxing.'),
+    Command('exclude b|c name',      'Drop branch from those I\'m muxing.'),
+    Command('setup',                 'Setup or verify correct environment.'),
+    Command('update',                'Apply latest patches to this tool.'),
+    Command('version',               'Display 3po version.'),
     ]
 
 def _calc_abbrevs():

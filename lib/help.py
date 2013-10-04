@@ -4,39 +4,39 @@ from ansi import printc, NORMTXT
 import ui
 
 def show():
-    printc('\n' + CMD_COLOR + APP_CMD + NORMTXT + ' -- ' + TITLE_COLOR + APP_TITLE + NORMTXT)
-    printc(DELIM_COLOR + '-'*78)
-    printc(TITLE_COLOR + 'git mux' + NORMTXT + ' [' + PARAM_COLOR
+    printc('\n' + TITLE_COLOR + 'git mux' + NORMTXT + ' [' + PARAM_COLOR
               + 'switches' + NORMTXT + '] ' + CMD_COLOR + 'action'
               + NORMTXT + ' [' + PARAM_COLOR + 'parameters' + NORMTXT + ']')
-        
+
     printc('''
 Possible actions and their parameters include:
 ''')
-    menu = '    ' + ui.MENU.replace('\n', '\n    ')
+    menu = '  ' + ui.MENU.replace('\n', '\n  ')
     printc(menu)
     printc(
-'''Action names may be abbreviated to any length that remains unambiguous.
+'The ' + PARAM_COLOR + 'b|c' + NORMTXT + ' notation in parameters indicates that the key word ' + PARAM_COLOR + 'branch' + NORMTXT + ''' or the key
+word ''' + PARAM_COLOR + 'component' + NORMTXT + ''' (or any short form thereof) is required. Action names may also
+be abbreviated to any length that remains unambiguous.
 
 Runs in scripted mode if it receives a logically complete command line.
 Otherwise, it prompts to gather parameters.
 
 Switches include:
 
-    '''
+  '''
              + PARAM_COLOR + '--auto-abort' + NORMTXT
              + '''             - Abort any time a prompt is needed after an
-                               action is invoked. This guarantees scripted
-                               mode, and prevents the program from doing
-                               dangerous things without confirmation. If
-                               actions are launched from the menu, this flag
-                               is ignored.
-    '''
+                             action is invoked. This guarantees scripted
+                             mode, and prevents the program from doing
+                             dangerous things without confirmation. If
+                             actions are launched from the menu, this flag
+                             is ignored.
+  '''
              + PARAM_COLOR + '--auto-confirm' + NORMTXT
              + '''           - Answer 'y' to any yes/no question after an
-                               action is invoked. Like --auto-abort, this
-                               guarantees scripted mode. However, it is more
-                               dangerous and should not be used casually.
+                             action is invoked. Like --auto-abort, this
+                             guarantees scripted mode. However, it is more
+                             dangerous and should not be used casually.
 
 Examples:
 

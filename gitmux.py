@@ -2,73 +2,30 @@
 
 import os, sys, re, subprocess
 
-from lib import help, engine, dispatch, constants, ui
-from lib.ansi import writec, printc, eprintc, NORMTXT
-from lib.colors import *
+from lib import help, engine, constants, ui, cmd, error
+from lib import setup as setup_module
 
-def _get_data(args, i, prompt, lst):
-    if args and len(args) > i:
-        return args[i]
-    else:
-        for x in lst:
-            writec('  ' + x['name'] + '\n', PARAM_COLOR)
-        return ui.prompt(prompt)        
-
-def branches(*args):
-    by_branch_name = engine.get().get_branches().by_branch_name
-    branch_names = sorted(by_branch_name.keys())
-    for branch_name in branch_names:
-        component_names = sorted(by_branch_name[branch_name])
-        writec(branch_name.ljust(20) + LINENUM_COLOR + ' (%s)\n' % ', '.join(component_names), PARAM_COLOR)
-
-def components(*args):
+def list(*args):
+    show_all = False
+    if args[0].lower() == 'all':
+        show_all = True
+        args = args[1:]
     eng = engine.get()
-    for b in eng.get_components():
-        writec(b['name'].ljust(20) + LINENUM_COLOR + ' (%s)\n' % b['url'], PARAM_COLOR)
-        
-def graft(*args):
-    eng = engine.get()
-    if args:
-        component = args[0]
+    which = args[0].lower()
+    if 'branches'.startswith(which):
+        by_branch_name = engine.get().get_branches().by_branch_name
+        branch_names = sorted(by_branch_name.keys())
+        for branch_name in branch_names:
+            component_names = sorted(by_branch_name[branch_name])
+            writec(branch_name.ljust(20) + NORMTXT + ' (%s)\n' % ', '.join(component_names), PARAM_COLOR)
+    elif 'components'.startswith(which):
+        for b in eng.get_components():
+            writec(b['name'].ljust(20) + NORMTXT + ' (%s)\n' % b['url'], PARAM_COLOR)
     else:
-        component = _get_data(args, 0, 'Component to graft?', eng.get_components())
-        if not component:
-            return
-    if args and len(args) > 1:
-        branch = args[1]
-    else:
-        branch = _get_data(args, 1, 'Branch to receive %s?' % component, eng.get_branches())
-        if not branch:
-            return
-    eng.add_component_to_branch(component, branch)
-    print('Grafted %s into %s.' % (component, branch))
+        raise Exception('Expected "list [all] branches|components".')
 
 def flow(*args):
     engine.get().flow(*args)
-    
-def retire(*args):
-    eng = engine.get()
-    if args:
-        branch = args[0]
-        args = args[1:]
-    else:
-        branch = _get_data(args, 0, 'Branch to flow?', eng.get_branches())
-        if not branch:
-            return
-    eng.retire(branch)
-    printc('Retired "%s" branch.' % branch)
-
-def revive(*args):
-    eng = engine.get()
-    if args:
-        branch = args[0]
-        args = args[1:]
-    else:
-        branch = _get_data(args, 0, 'Branch to flow?', eng.get_branches())
-        if not branch:
-            return
-    eng.revive(branch)
-    printc('Revived "%s" branch.' % branch)
 
 _HELP_SWITCHES = ['?','help']
 def _parse_switches(args):
@@ -77,9 +34,6 @@ def _parse_switches(args):
     i = j = 0
     while i < len(args):
         arg = args[i]
-        # Stop parsing args after 'do' keyword in foreach ... do construct.
-        if arg == 'do':
-            break
         val = None
         if arg.startswith('--'):
             val = arg[2:]
@@ -98,10 +52,6 @@ def _parse_switches(args):
                 prompter.set_mode(prompt.AUTOCONFIRM_MODE)
             elif val == 'auto-abort':
                 prompter.set_mode(prompt.AUTOABORT_MODE)
-            elif val == 'test':
-                config.test_mode = True
-                config.sandbox_container_folder = TEST_SANDBOXES
-                prompter.set_mode(prompt.AUTOCONFIRM_MODE)
             else:
                 # Normalize switch.
                 args.insert(i, '--%s' % val)
@@ -116,13 +66,64 @@ def _parse_switches(args):
         sys.exit(1)
     return args
 
+def setup(*args):
+    return setup_module.run()
+
+def dispatch(symbols, args):
+    '''
+    Given a bunch of symbols from the python locals() or globals() function,
+    examine args and call the appropriate function. This dynamically connects
+    verbs on 3po's command line to functions in the program.
+    '''
+    funcs = []
+    for x in args[0].split(','):
+        this_cmd = cmd.find_command(x)
+        if this_cmd:
+            funcs.append(this_cmd.verb)
+        else:
+            funcs.append(x)
+    args = args[1:]
+    if args:
+        if args[0].startswith('lambda'):
+            args[0] = eval(args[0])
+    for func in funcs:
+        # Look up the named function in our symbols and invoke it,
+        # if found. Otherwise, display interactive menu.
+        try:
+            if func in symbols:
+                # On *nix, guarantee correct security context so file permissions
+                # don't get messed up.
+                if os.name != 'nt':
+                    if (func == 'setup') != (os.getuid() == 0):
+                        ui.eprintc('Run setup as root, and all other commands as a normal user.', ui.ERROR_COLOR)
+                        return 1
+                err = symbols[func](*args)
+                if err is None:
+                    err = 0
+                if err:
+                    return err
+            else:
+                ui.eprintc('Unrecognized command "%s". Try "%s help" for syntax.' % (func, APP_CMD), ui.ERROR_COLOR)
+                return 1
+        except KeyboardInterrupt:
+            # Allow CTRL+C to kill loop
+            print('')
+            break
+        except SystemExit:
+            # If one of the functions that we call invokes sys.exit(), accept
+            # that function's judgment without comment.
+            raise
+        except Exception:
+            # Generally, trap all other errors and report them.
+            error.write()
+            return 1
+
 if __name__ == '__main__':
     err = 0
     symbols = locals()
     args = _parse_switches(sys.argv[1:])
     if not args:
         help.show()
-        sys.exit(0)
     else:
-        err = dispatch.dispatch(symbols, args)
+        err = dispatch(symbols, args)
     sys.exit(err)

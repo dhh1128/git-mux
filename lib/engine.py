@@ -4,13 +4,12 @@ import constants
 from colors import *
 from ansi import *
 
-_DATA_REPO = 'springville:/home/dhardman/git-server-repos/git-mux-data.git'
+_DATA_REPO = 'git@github.com:dhh1128/git-mux-data.git'
 _LOCAL_DATA_REPO = os.path.join(constants.HOMEDIR, '.git-mux-data')
 _REPO_ROOT = os.path.join(constants.HOMEDIR, 'git-mux-cache')
 _PROTECTED_BRANCHES = ['master', 'develop']
-_BRANCHES_FILE = 'branches.json'
 _COMPONENTS_FILE = 'components.json'
-_SUPPRESS_GITFLOW_LINE_PAT = re.compile(r'^ +(init|version|support) +.*?\n', re.MULTILINE)
+_SUPPRESS_GITFLOW_LINE_PAT = re.compile(r'^ +(init|version|support|git flow [a-z]+ (publish|track|checkout)) +.*?\n', re.MULTILINE)
 _VALID_BRANCH_TYPES_PAT = re.compile('^(?:feature|release|hotfix)$')
 _VALID_BRANCH_NAMES_PAT = re.compile('[a-z]+(?:[-a-z]*[a-z])?$')
 _SCRATCH_BRANCH_NAME = 'scratch'
@@ -184,7 +183,15 @@ class Engine:
                 stdout = 'Branch %s started.' % full_branch_name
                 self.get_branches().add(full_branch_name, component_name)
 
-        # Make sure remote repo has this same branch.
+        # Make sure remote repo has this same branch. (This command does approximately
+        # the same thing as "git flow feature publish"; I'm using it because I got it
+        # working this way after some experimentation, and don't want to fiddle anymore.
+        # However, Git's syntax for this command changed from 1.7 to 1.8, and I'm using
+        # the newer variant, so there is some possibility that we'll want to use
+        # git flow's publish command instead: git.flow(branch_type, 'publish', branch_name).
+        # If we do that, we should probably only do it when branches are created --
+        # whereas the current impl is idempotent and can therefore repair disconnected
+        # local branches.
         git.push('--set-upstream', 'origin', full_branch_name)
 
         return exit_code, stdout, stderr
@@ -225,11 +232,23 @@ class Engine:
             return None, None, None
 
     def _flow_pull(self, state, component_name, git, *args):
+        # This command takes slightly different syntax than the others; it wants a
+        # git remote before the named branch. To accommodate that but still use our
+        # normal parsing logic, we have to do a little fiddling.
+        args = list(*args)
+        named_args = [arg for arg in args if not arg.startswith('-')]
+        print('args = %s; named_args = %s' % (args, named_args))
+        if len(named_args) != 4:
+            raise Exception('Expected "flow <branch_type> pull [-r] <remote> <name>".')
+        else:
+            remote = named_args[2]
+            args.remove(remote)
         self._prep_for_existing_branch(state, *args)
 
         if component_name in state.components_with_branch:
             git.checkout(state.full_branch_name)
-            exit_code, stdout, stderr = git.pull(with_extended_output=True)
+            args.insert(2, remote)
+            exit_code, stdout, stderr = git.flow(*args, with_extended_output=True)
             return exit_code, stdout, stderr
 
     def _flow_push(self, state, component_name, git, *args):
@@ -240,18 +259,46 @@ class Engine:
             exit_code, stdout, stderr = git.push(with_extended_output=True)
             return exit_code, stdout, stderr
 
+    def _flow_rebase(self, state, component_name, git, *args):
+        self._prep_for_existing_branch(state, *args)
+
+        if component_name in state.components_with_branch:
+            git.checkout(state.full_branch_name)
+            exit_code, stdout, stderr = git.flow(*args, with_extended_output=True)
+            return exit_code, stdout, stderr
+
+    def _flow_diff(self, state, component_name, git, *args):
+        self._prep_for_existing_branch(state, *args)
+
+        if component_name in state.components_with_branch:
+            git.checkout(state.full_branch_name)
+            exit_code, stdout, stderr = git.flow(*args, with_extended_output=True)
+            return exit_code, stdout, stderr
+
+    def _flow_help(self, *args):
+        git = gitpython.Git()
+        x = git.flow(*args, as_process=True)
+        stdout, stderr = x.proc.communicate()
+        # A few gitflow operations are not supported.
+        stdout = _SUPPRESS_GITFLOW_LINE_PAT.sub('', stdout)
+        # Tell users to call git flow through git mux.
+        stdout = stdout.replace('git flow', 'git mux flow')
+        # We don't allow usage where the branch name is omitted and
+        # the active branch is implied. We also disallow just branch
+        # prefixes. This is a safety precaution; when muxing, that's
+        # important.
+        stdout = stdout.replace('[<name|nameprefix>]', '<name>')
+        # On the "pull" operation, we require name as well.
+        stdout = stdout.replace('[<name>]', '<name>')
+        print(stdout)
+
     def flow(self, *args):
 
         if not args:
             args = ['help']
 
         if args[-1] == 'help':
-            git = gitpython.Git()
-            x = git.flow(*args, as_process=True)
-            stdout, stderr = x.proc.communicate()
-            stdout = stdout.replace('git flow', 'git mux flow')
-            stdout = _SUPPRESS_GITFLOW_LINE_PAT.sub('', stdout)
-            print(stdout)
+            self._flow_help(*args)
             return
 
         first = args[0]
@@ -311,6 +358,14 @@ class Engine:
             self._update_file(_BRANCHES_FILE, self._branches, 'retire %s branch' % branch)
 
     def revive(self, branch):
+        which = _find_by_name(self.get_branches(), branch, 'Branch')
+        if branch not in [b['name'] for b in self.get_branches(lambda b: b['status'] == 'retired')]:
+            raise Exception('Branch "%s" is not retired.' % branch)
+        which['status'] = 'active'
+        with EngineLock():
+            self._update_file(_BRANCHES_FILE, self._branches, 'revive %s branch' % branch)
+
+    def refresh(self):
         which = _find_by_name(self.get_branches(), branch, 'Branch')
         if branch not in [b['name'] for b in self.get_branches(lambda b: b['status'] == 'retired')]:
             raise Exception('Branch "%s" is not retired.' % branch)
