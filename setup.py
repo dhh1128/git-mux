@@ -184,7 +184,11 @@ def setup_data():
         os.path.join(data_path, '.git')
         
 def update_app():
+    import git as gitpython
     git = gitpython.Git(config.BIN_FOLDER)
+    stdout = git.status()
+    print('stdout = "%s"' % stdout)
+    sys.exit(0)
     exit_code, stdout, stderr = git.pull()
     stdout += stderr
     if exit_code or stderr:
