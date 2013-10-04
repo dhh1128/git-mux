@@ -56,7 +56,7 @@ def get_non_root_user():
     global _non_root_user
     if _non_root_user is None:
         if os.getegid() == 0:
-            report_step('Finding non-root user')
+            report_step('identify non-root user')
             _non_root_user = check_ownership()
             if _non_root_user == 'root':
                 die('%s is owned by root instead of ordinary user.' % config.GMUX_ROOT)
@@ -184,22 +184,25 @@ def setup_data():
         os.path.join(data_path, '.git')
         
 def update_app():
+    report_step('check for out-of-date %s' % config.APP_NAME)
     import git as gitpython
     git = gitpython.Git(config.BIN_FOLDER)
     stdout = git.status()
-    print('stdout = "%s"' % stdout)
-    sys.exit(0)
-    exit_code, stdout, stderr = git.pull()
-    stdout += stderr
-    if exit_code or stderr:
-        die(stdout)
-    elif stdout.find('Unpacking objects') > -1:
-        die('%s was out of date. Re-run setup with new version.' % config.APP_NAME)
+    # See if we have changed the app locally.
+    if stdout.find('nothing to commit') == -1:
+        ui.eprintc('Reminder: you have uncommitted local changes to %s.' % config.APP_NAME, ui.WARNING_COLOR)
+    else:
+        if stdout.find('ahead of origin') > -1:
+            ui.eprintc('Reminder: you have changes to %s that need to be pushed.' % config.APP_NAME, ui.WARNING_COLOR)
+        # Safe to pull.
+        stdout = git.pull()
+        if stdout.find('lready up-to-date') == -1:
+            print(stdout)
+            die('%s was out of date; re-run setup with new version.' % config.APP_NAME)
+    print('no remote changes to worry about')
 
 def run(audit_only=False):
-
     exit_code = 0
-
     try:
         # Check basic prerequisites, and fix them if appropriate.
         
