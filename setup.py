@@ -24,10 +24,11 @@ Installation instructions:
 '''
 
 def report_step(step):
-    ui.printc('%s...' % step, ui.PARAM_COLOR)
+    ui.printc('\n%s...' % step, ui.PARAM_COLOR)
 
 def complain(problem):
     ui.eprintc(problem, ui.ERROR_COLOR)
+    return 1 # return an exit code that implies an error
 
 _non_root_user = None
 def get_non_root_user():
@@ -89,24 +90,7 @@ def setup_folder_layout(audit_only=False):
         die(msg)
     else:
         print('Folder layout is correct.')
-    return True
-
-def setup_writable_app_folder(audit_only=False):
-    report_step('Checking for writable app folder')
-    nru = _get_non_root_user()
-    tmp_path = os.path.join(APP_FOLDER, ".tmp" + str(time.time()))
-    exit_code, stdout, stderr = do('touch %s' % tmp_path, as_user=nru)
-    try:
-        if exit_code:
-            msg = '%s is not writable by %s.' % (config.APP_FOLDER, nru)
-            if audit_only:
-                return complain(msg)
-            die(msg)
-        else:
-            print('%s is writable by %s.' % (config.APP_FOLDER, nru))
-    finally:
-        os.remove(tmp_path)
-    return True
+    return 0
 
 def setup_app_cloned(audit_only=False):
     report_step('Checking whether app was installed by cloning a git repo')
@@ -120,7 +104,7 @@ from updating itself.
         die(msg)
     else:
         print('%s was cloned correctly.' % config.APP_TITLE)
-    return True
+    return 0
 
 def setup_git(audit_only=False):
     report_step('Checking git')
@@ -129,12 +113,12 @@ def setup_git(audit_only=False):
         if audit_only:
             return complain('Git is not installed.')
         print('Installing git.')
-        do_or_die('%s install git /y' % get_installer(), 'Need git to be installed.')
+        do_or_die('%s -y install git' % get_installer(), 'Need git to be installed.')
         print('Try setup again, now that git is installed.')
         sys.exit(1)
     else:
         print('Git is installed.')
-    return True
+    return 0
 
 def setup_git_python(audit_only=False):
     report_step('Checking gitpython')
@@ -146,7 +130,7 @@ def setup_git_python(audit_only=False):
             return complain('Gitpython is not installed.')
         print('Installing gitpython.')
         do_or_die('easy_install gitpython', explanation='Need gitpython to be installed.')
-    return True
+    return 0
 
 def setup_git_flow(audit_only=False):
     report_step('Checking git-flow')
@@ -159,28 +143,37 @@ def setup_git_flow(audit_only=False):
         pkg = 'gitflow'
         if installer == 'apt-get':
             pkg = 'git-flow'
-        do_or_die('%s install %s /y' % (installer, pkg), explanation='Need git-flow to be installed.')
+        do_or_die('%s -y install %s' % (installer, pkg), explanation='Need git-flow to be installed.')
     else:
         print('Git-flow is installed.')
-    return True
+    return 0
 
 def run(audit_only=False):
     # Only run this as root. This is a backup check; it's also enforced
     # in gitmux.setup().
     if os.getuid() != 0:
         die('Must run setup as root user.')
+    exit_code = 0
     # Make sure we know who is the non-root user that's temporarily running
     # with elevated privileges, so we can run other commands as that user.
     get_non_root_user()
     try:
-        setup_git()
-        setup_git_python()
-        setup_git_flow()
-        setup_folder_layout()
-        setup_app_cloned()
-        setup_writable_app_folder()
+        exit_code += setup_git(audit_only)
+        if not exit_code:
+            exit_code += setup_git_python(audit_only)
+            exit_code += setup_git_flow(audit_only)
+        exit_code += setup_folder_layout(audit_only)
+        exit_code += setup_app_cloned(audit_only)
+        operation = 'Setup'
+        if audit_only:
+            operation = 'Setup audit'
+            outcome = 'succeeded'
+        if exit_code:
+            outcome = 'failed'
+        print('\n%s %s.\n' % (operation, outcome))
+        return exit_code
     except KeyboardInterrupt:
-        eprintc('\n\nConfiguration not saved.\n', WARNING_COLOR)
+        ui.eprintc('\nSetup interrupted.\n', WARNING_COLOR)
         pass
     except SystemExit:
         pass
@@ -189,4 +182,4 @@ def run(audit_only=False):
 
 if __name__ == '__main__':
     audit_only = len(sys.argv) > 1 and sys.argv[1].lower().find('audit') > -1
-    run(audit_only)
+    sys.exit(run(audit_only))
