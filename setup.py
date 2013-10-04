@@ -30,15 +30,36 @@ def complain(problem):
     ui.eprintc(problem, ui.ERROR_COLOR)
     return 1 # return an exit code that implies an error
 
+_owner = None
+def check_ownership(report=False):
+    # This function can be called indirectly (when running as root and needing
+    # to figure out who our non-root user ought to be). Or it can be called
+    # explicitly, when auditing setup. We only want to report it as a discrete
+    # step when we're auditing. Complicating this, we may call the function several
+    # times in a single run of the program, and we need to have different return
+    # values depending on our modes. Sorry to be messy.
+    global _owner
+    if _owner is None:
+        if report:
+            report_step('owner of %s' % config.GMUX_ROOT)
+        _owner = do_or_die('stat -c %%U %s' % config.GMUX_ROOT, explanation='Need to check owner of GMUX_ROOT.').strip()
+        if report:
+            if _non_root_user == 'root':
+                die('%s is owned by root instead of ordinary user' % config.GMUX_ROOT)
+            else:
+                print('%s is owned by %s, as it should be' % (config.GMUX_ROOT, _owner))
+                return 0
+    return _owner
+
 _non_root_user = None
 def get_non_root_user():
     global _non_root_user
     if _non_root_user is None:
         if os.getegid() == 0:
             report_step('Finding non-root user')
-            _non_root_user = do_or_die('stat -c %%U %s' % config.GMUX_ROOT, explanation='Need to be able to figure out non-root user.').strip()
+            _non_root_user = check_ownership()
             if _non_root_user == 'root':
-                die('%s is owned by root. Needs to be owned by ordinary user.' % config.GMUX_ROOT)
+                die('%s is owned by root instead of ordinary user.' % config.GMUX_ROOT)
         else:
             import getpass
             _non_root_user = getpass.getuser()
@@ -63,7 +84,7 @@ def die(msg):
 def do(cmd, as_user=None):
     if as_user:
         if os.getegid() == 0:
-            cmd = 'runuser -l %s %s' % (as_user, cmd)
+            cmd = 'su %s -c "%s"' % (as_user, cmd.replace('"', '\\"'))
     print(cmd)
     proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, shell=True)
     stdout, stderr = proc.communicate()
@@ -103,12 +124,12 @@ def setup_app_cloned(audit_only=False):
         msg = '''
 %s has not been installed with a git clone command. This will prevent it
 from updating itself.
-''' % config.APP_TITLE + config.INSTALLATION_INSTRUCTIONS
+''' % config.APP_NAME + config.INSTALLATION_INSTRUCTIONS
         if audit_only:
             return complain(msg)
         die(msg)
     else:
-        print('%s was cloned correctly' % config.APP_TITLE)
+        print('%s was cloned correctly' % config.APP_NAME)
     return 0
 
 def setup_git(audit_only=False):
@@ -157,34 +178,51 @@ def setup_data():
     data_path = os.path.join(config.GMUX_ROOT, 'git-mux-data')
     git = None
     if not os.path.isdir(data_path):
-        os.makedirs(
+        os.makedirs()
         git = gitpython.Git(data_path)
     else:
+        os.path.join(data_path, '.git')
+        
+def update_app():
+    git = gitpython.Git(config.BIN_FOLDER)
+    exit_code, stdout, stderr = git.pull()
+    if exit_code or stdout.find('xx') > -1:
+        die('%s was out of date. Re-run setup with new version.' % config.APP_NAME)
 
-        os.path.join(data_path, '.git')):
+def run(audit_only=False):
 
-def run(audit_only=False, nonroot_only=False):
-    # Only run this as root. This is a backup check; it's also enforced
-    # in gitmux.setup().
-    if not audit_only and not nonroot_only:
-        if os.getegid() != 0:
-            die('Must run setup as root user.')
     exit_code = 0
-    # Make sure we know who is the non-root user that's temporarily running
-    # with elevated privileges, so we can run other commands as that user.
-    get_non_root_user()
+
     try:
+        # Check basic prerequisites, and fix them if appropriate.
+        
+        # Verify correct security context.
+        as_root = os.getegid() == 0
+        if as_root:
+            nru = get_non_root_user()
+        else:
+            if audit_only:
+                exit_code += check_ownership(report=True)
+            else:
+                die('Must run setup as root user.')
+            
         exit_code += setup_git(audit_only)
+        
+        # Only check gitpython and git-flow if git's working.
         if not exit_code:
             exit_code += setup_git_python(audit_only)
             exit_code += setup_git_flow(audit_only)
+            
         exit_code += setup_folder_layout(audit_only)
         exit_code += setup_app_cloned(audit_only)
+        
         if not audit_only:
             # We need to do the rest of the setup as the unprivileged user
-            # instead of as root. The easiest way to do this is to launch
-            # another copy of ourselves using the linux runuser utility...
-
+            # instead of as root.
+            if update_app():
+                pass
+            
+        # Summarize what happened.
         operation = 'Setup'
         if audit_only:
             operation = 'Setup audit'
@@ -192,7 +230,9 @@ def run(audit_only=False, nonroot_only=False):
         if exit_code:
             outcome = 'failed'
         print('\n%s %s.\n' % (operation, outcome))
+
         return exit_code
+    
     except KeyboardInterrupt:
         ui.eprintc('\nSetup interrupted.\n', WARNING_COLOR)
         pass
@@ -204,23 +244,21 @@ def run(audit_only=False, nonroot_only=False):
 if __name__ == '__main__':
     show_help = False
     audit = False
-    nonroot = False
     if len(sys.argv) > 2:
         show_help = True
     else:
-        if len(sys.argv) > 1:
-            arg = sys.argv[1].lower()
-            if arg.find('?') or arg.startswith('-') or arg.startswith('h'):
-                show_help = True
-            elif arg.find('audit') > -1:
+        if len(sys.argv) == 2:
+            if sys.argv[1].lower().find('audit') > -1:
                 audit = True
-            elif arg.find('non') > -1 and arg.find('root') > -1:
-                nonroot = True
+            else:
+                show_help = True
+                
+    # Take care of "help" mode inline.
     if show_help:
         print('''
 sudo python setup.py   -- run setup
 python setup.py audit  -- verify that setup is correct
 ''')
         sys.exit(0)
-    else:
-        sys.exit(run(audit_only=audit, nonroot_only=nonroot))
+        
+    sys.exit(run(audit_only=audit))
