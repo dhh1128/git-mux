@@ -24,6 +24,7 @@ if GMUX_ROOT.endswith('/'):
 
 CONFIG_FOLDER = os.path.join(GMUX_ROOT, 'etc')
 CONFIG_FNAME = '%s.cfg' % APP_NAME
+SHARED_CONFIG_FNAME = 'shared.cfg'
 CONFIG_FQPATH = os.path.join(CONFIG_FOLDER, CONFIG_FNAME)
 
 CYGWIN = False
@@ -37,10 +38,12 @@ if HOMEDIR.find('cygwin') > -1:
 
 class MyConfigParser(ConfigParser.SafeConfigParser):
     def __init__(self, path=None):
+        ConfigParser.SafeConfigParser.__init__(self)
         if not path:
             path = CONFIG_FQPATH
+        self.path = path
         if os.path.isfile(self.path):
-            cfg.read(self.path)
+            self.read(self.path)
     def add_section_if_missing(self, section):
         if not self.has_section(section):
             self.add_section(section)
@@ -49,10 +52,10 @@ class MyConfigParser(ConfigParser.SafeConfigParser):
         self.set(section, key, value)
     def save(self):
         with open(self.path, 'w') as f:
-            write(f)
-    def try_get(self, section, key, value, default=None):
-        if self.has_option(section, option):
-            return self.get(section, option)
+            self.write(f)
+    def try_get(self, section, key, default=None):
+        if self.has_option(section, key):
+            return self.get(section, key)
         return default
 
-cfg = MyConfigParser
+cfg = MyConfigParser()

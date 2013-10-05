@@ -18,9 +18,7 @@ _CMDS = [
     Command('flow type action name', 'Run git flow on my components.'),
     Command('include b|c name',      'Add branch/component to those I\'m muxing.'),
     Command('exclude b|c name',      'Drop branch from those I\'m muxing.'),
-    Command('setup',                 'Setup or verify correct environment.'),
     Command('update',                'Apply latest patches to this tool.'),
-    Command('version',               'Display 3po version.'),
     ]
 
 def _calc_abbrevs():

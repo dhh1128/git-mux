@@ -192,7 +192,7 @@ def remote_to_local(repo):
         local = local[0:-4]
     return local
 
-def define_branches(nru):
+def define_branches():
     report_step('define branches')
     print('''Large software engineering teams may have many active branches, but only a few
 may be interesting to any given branch maintainer. By default, %s will operate
@@ -207,6 +207,8 @@ You may also use the keyword "all" to manage all git-flow style branches, or
 "mine" for just ones you create in the future.
 ''' % config.APP_NAME)
     cfg = config.cfg
+    SECTION = 'muxed branches'
+    KEY = 'selected'
     muxed_branches = cfg.try_get(SECTION, KEY, 'mine')
     while True:
         # Prompt. Then apply various filters and see if user gave us anything usable.
@@ -238,7 +240,7 @@ def define_components(nru):
     cfg = config.cfg
     SECTION = 'misc'
     KEY = 'shared cfg repo'
-    shared_cfg_repo = cfg.get(SECTION, KEY, default_shared_cfg_repo)
+    shared_cfg_repo = cfg.try_get(SECTION, KEY, default_shared_cfg_repo)
     local_shared_cfg_folder = os.path.join(data_folder, config.SHARED_CFG_REPO_NAME)
 
     if not os.path.isdir(data_folder):
@@ -281,13 +283,13 @@ def define_components(nru):
     defined = muxed
     defined_items = []
     if shared_cfg_repo:
-        components_file = os.path.join(local_shared_cfg_folder, 'components.config')
+        components_file = os.path.join(local_shared_cfg_folder, config.SHARED_CONFIG_FNAME)
         if os.path.isfile(components_file):
             cfg2 = ConfigParser.SafeConfigParser()
             cfg2.read(components_file)
             SECTION2 = 'defined components'
-            if cfg2.has_section(SECTION2)
-            defined_items = cfg2.items(SECTION2)
+            if cfg2.has_section(SECTION2):
+                defined_items = cfg2.items(SECTION2)
             if defined_items:
                 defined += ', '.join([pair[0] for pair in defined_items])
     defined_names = [x[0] for x in defined_items]
@@ -338,6 +340,37 @@ in the form "name=url".
                 break
             else:
                 ui.eprintc('You must define some components to mux across.', ui.ERROR_COLOR)
+
+def check_components():
+    report_step('check components')
+    try:
+        items = config.cfg.items('muxed components')
+        if items:
+            print('muxing on %s' % ', '.join([x[0] for x in items]))
+            return 0
+    except:
+        pass
+    return complain('components for muxing are undefined')
+
+def setup_path(audit_only=False):
+    report_step('%s is in path' % config.APP_NAME)
+    if audit_only:
+        # Right now I can't figure out how to test the path of the non-root user.
+        # Every experiment I attempt fails. I've tried os.setuid(), su <user> -c which,
+        # runuser, etc...
+        if os.getegid() != 0:
+            do_or_die('which %s' % config.APP_NAME)
+    else:
+        # We unconditionally remove any old symlink that's laying around,
+        # to guarantee that every time we run setup, we end up with the
+        # current version of the program being the one that will subsequently
+        # run.
+        symlink = '/usr/local/bin/%s' % config.APP_NAME
+        if os.path.isfile(symlink):
+            os.remove(symlink)
+        do_or_die('ln -s %s/%s %s' % (config.BIN_FOLDER, config.APP_NAME, symlink))
+    print('path checks out')
+    return 0
 
 class WorkingDir:
     '''
@@ -397,8 +430,11 @@ def run(audit_only=False):
 
         exit_code += setup_folder_layout(audit_only)
         exit_code += setup_app_cloned(audit_only)
+        exit_code += setup_path(audit_only)
 
-        if not audit_only:
+        if audit_only:
+            exit_code += check_components()
+        else:
 
             # We need to do the rest of the setup as the unprivileged user
             # instead of as root. But we need to have a config file that's
@@ -409,7 +445,7 @@ def run(audit_only=False):
                 do_or_die('touch %s' % config.CONFIG_FQPATH, as_user=nru)
 
             update_app(nru)
-            define_components()
+            define_components(nru)
             define_branches()
             config.cfg.save()
 
