@@ -1,12 +1,11 @@
 import os, json, time, sys, fcntl, re, inspect
 
-import constants
-from colors import *
-from ansi import *
+import config
+from ui import *
 
 _DATA_REPO = 'git@github.com:dhh1128/git-mux-data.git'
-_LOCAL_DATA_REPO = os.path.join(constants.HOMEDIR, '.git-mux-data')
-_REPO_ROOT = os.path.join(constants.HOMEDIR, 'git-mux-cache')
+_LOCAL_DATA_REPO = os.path.join(config.HOMEDIR, '.git-mux-data')
+_REPO_ROOT = os.path.join(config.HOMEDIR, 'git-mux-cache')
 _PROTECTED_BRANCHES = ['master', 'develop']
 _COMPONENTS_FILE = 'components.json'
 _SUPPRESS_GITFLOW_LINE_PAT = re.compile(r'^ +(init|version|support|git flow [a-z]+ (publish|track|checkout)) +.*?\n', re.MULTILINE)
@@ -407,7 +406,7 @@ class EngineLock:
     # Allow _NamedSemaphore to be used in python's "with" block.
     def __init__(self, path=None):
         if not path:
-            path = os.path.join(constants.HOMEDIR, '.git-mux-lock')
+            path = os.path.join(config.HOMEDIR, '.git-mux-lock')
         self.semaphore = _NamedSemaphore(path)
     def __enter__(self):
         self.semaphore.acquire()

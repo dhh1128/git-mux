@@ -1,9 +1,8 @@
 #!/usr/bin/env python
 
-import os, sys, re, subprocess
+import os, sys, re, subprocess, traceback
 
-from lib import help, engine, constants, ui, cmd, error
-from lib import setup as setup_module
+from lib import help, engine, ui, cmd, config
 
 def list(*args):
     show_all = False
@@ -17,10 +16,10 @@ def list(*args):
         branch_names = sorted(by_branch_name.keys())
         for branch_name in branch_names:
             component_names = sorted(by_branch_name[branch_name])
-            writec(branch_name.ljust(20) + NORMTXT + ' (%s)\n' % ', '.join(component_names), PARAM_COLOR)
+            ui.writec(branch_name.ljust(20) + ui.NORMTXT + ' (%s)\n' % ', '.join(component_names), ui.PARAM_COLOR)
     elif 'components'.startswith(which):
         for b in eng.get_components():
-            writec(b['name'].ljust(20) + NORMTXT + ' (%s)\n' % b['url'], PARAM_COLOR)
+            ui.writec(b['name'].ljust(20) + ui.NORMTXT + ' (%s)\n' % b['url'], ui.PARAM_COLOR)
     else:
         raise Exception('Expected "list [all] branches|components".')
 
@@ -67,7 +66,7 @@ def _parse_switches(args):
     return args
 
 def setup(*args):
-    return setup_module.run()
+    print('Run "python %s instead. Use --help for more info.' % os.path.join(config.BIN_FOLDER, 'setup.py'))
 
 def dispatch(symbols, args):
     '''
@@ -91,12 +90,6 @@ def dispatch(symbols, args):
         # if found. Otherwise, display interactive menu.
         try:
             if func in symbols:
-                # On *nix, guarantee correct security context so file permissions
-                # don't get messed up.
-                if os.name != 'nt':
-                    if (func == 'setup') != (os.getuid() == 0):
-                        ui.eprintc('Run setup as root, and all other commands as a normal user.', ui.ERROR_COLOR)
-                        return 1
                 err = symbols[func](*args)
                 if err is None:
                     err = 0
@@ -115,7 +108,7 @@ def dispatch(symbols, args):
             raise
         except Exception:
             # Generally, trap all other errors and report them.
-            error.write()
+            ui.eprintc('%s' % traceback.format_exc(), ui.ERROR_COLOR)
             return 1
 
 if __name__ == '__main__':

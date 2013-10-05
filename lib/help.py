@@ -1,7 +1,4 @@
-from constants import APP_CMD, APP_TITLE
-from colors import CMD_COLOR, TITLE_COLOR, PARAM_COLOR, DELIM_COLOR
-from ansi import printc, NORMTXT
-import ui
+from ui import *
 
 def show():
     printc('\n' + TITLE_COLOR + 'git mux' + NORMTXT + ' [' + PARAM_COLOR
@@ -11,7 +8,7 @@ def show():
     printc('''
 Possible actions and their parameters include:
 ''')
-    menu = '  ' + ui.MENU.replace('\n', '\n  ')
+    menu = '  ' + MENU.replace('\n', '\n  ')
     printc(menu)
     printc(
 'The ' + PARAM_COLOR + 'b|c' + NORMTXT + ' notation in parameters indicates that the key word ' + PARAM_COLOR + 'branch' + NORMTXT + ''' or the key
