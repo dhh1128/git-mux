@@ -22,10 +22,15 @@ GMUX_ROOT = os.path.abspath(os.path.join(BIN_FOLDER, '..')).replace('\\', '/')
 if GMUX_ROOT.endswith('/'):
     GMUX_ROOT = GMUX_ROOT[0:-1]
 
+DATA_FOLDER = os.path.join(GMUX_ROOT, 'data')
 CONFIG_FOLDER = os.path.join(GMUX_ROOT, 'etc')
 CONFIG_FNAME = '%s.cfg' % APP_NAME
 SHARED_CONFIG_FNAME = 'shared.cfg'
 CONFIG_FQPATH = os.path.join(CONFIG_FOLDER, CONFIG_FNAME)
+MISC_SECTION = 'misc'
+SETUP_SUCCESS_DATE_KEY = 'successful setup date'
+SHARED_CONFIG_REPO_KEY = 'shared cfg repo'
+MUXED_COMPONENTS_SECTION = 'muxed components'
 
 CYGWIN = False
 if os.name == 'nt':
@@ -57,5 +62,7 @@ class MyConfigParser(ConfigParser.SafeConfigParser):
         if self.has_option(section, key):
             return self.get(section, key)
         return default
+    def setup_has_succeeded(self):
+        return bool(self.try_get(MISC_SECTION, SETUP_SUCCESS_DATE_KEY))
 
 cfg = MyConfigParser()

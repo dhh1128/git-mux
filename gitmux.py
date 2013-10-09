@@ -74,6 +74,10 @@ def dispatch(symbols, args):
     examine args and call the appropriate function. This dynamically connects
     verbs on 3po's command line to functions in the program.
     '''
+    if not config.cfg.setup_has_succeeded():
+        ui.eprintc('Run "sudo python %s/setup.py" first.' % config.BIN_FOLDER, ui.ERROR_COLOR)
+        sys.exit(1)
+
     funcs = []
     for x in args[0].split(','):
         this_cmd = cmd.find_command(x)

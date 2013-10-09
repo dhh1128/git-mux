@@ -1,11 +1,10 @@
-import os, json, time, sys, fcntl, re, inspect
+import os, time, sys, fcntl, re, inspect
 
 import config
 from ui import *
 
-_DATA_REPO = 'git@github.com:dhh1128/git-mux-data.git'
-_LOCAL_DATA_REPO = os.path.join(config.HOMEDIR, '.git-mux-data')
-_REPO_ROOT = os.path.join(config.HOMEDIR, 'git-mux-cache')
+_LOCAL_DATA_REPO = os.path.join(config.DATA_FOLDER, '.git-mux-data')
+_REPO_ROOT = config.DATA_FOLDER
 _PROTECTED_BRANCHES = ['master', 'develop']
 _COMPONENTS_FILE = 'components.json'
 _SUPPRESS_GITFLOW_LINE_PAT = re.compile(r'^ +(init|version|support|git flow [a-z]+ (publish|track|checkout)) +.*?\n', re.MULTILINE)
@@ -29,44 +28,12 @@ class Engine:
         self._components = None
         self._last_update = 0
 
-    def _update_local_data_repo(self):
-        # Don't let any other thread, or any other sibling process, interact
-        # with my machine-wide data at the same time.
-        with EngineLock():
-            try:
-                if not os.path.isdir(os.path.join(self._folder, '.git')):
-                    if not os.path.isdir(self._folder):
-                        os.makedirs(self._folder)
-                    self._git = gitpython.Git(working_dir=self._folder)
-                    self._git.clone(_DATA_REPO, '.')
-                else:
-                    # Don't update more than once every few secs
-                    now = time.time()
-                    if now - self._last_update < 10:
-                        return
-                    self._git = gitpython.Git(working_dir=self._folder)
-                self._last_update = time.time()
-                self._git.pull()
-            except:
-                raise Exception('Unable to pull latest 3po data into %s. %s.' % (self._folder, sys.exc_info()[1]))
-
     def _find_component_by_name(self, name):
         which = [x for x in self.get_components() if x['name'] == name]
         if not which:
             raise Exception('Component "%s" is not recognized.' % (object_type, name))
         assert len(which) == 1
         return which[0]
-
-    def _read_json(self, fname):
-        self._update_local_data_repo()
-        try:
-            path = os.path.join(self._folder, fname)
-            f = open(path, 'r')
-            txt = f.read()
-            f.close()
-            return json.loads(txt)
-        except:
-            raise Exception('Could not parse %s. %s.' % (path, sys.exc_info()[1]))
 
     # Define a class that holds branches indexed 2 ways -- by branch name,
     # and by the name of the component that has the branch.
@@ -115,8 +82,11 @@ class Engine:
 
     def get_components(self):
         if self._components is None:
-            self._components = self._read_json(_COMPONENTS_FILE)
-            self._components.sort(key=lambda x: x['name'])
+            c = []
+            for i in config.cfg.items(config.MUXED_COMPONENTS_SECTION):
+                c.append({'name': i[0], 'url': i[1]})
+            c.sort(key=lambda x: x['name'])
+            self._components = c
         return self._components
 
     def add_component_to_branch(self, component, branch):
@@ -202,7 +172,7 @@ class Engine:
         # Validate some input.
         branches = self.get_branches()
         if not state.full_branch_name in branches.by_branch_name:
-            raise Exception('Branch "%s" is not recognized.' % full_branch_name)
+            raise Exception('Branch "%s" is not recognized.' % state.full_branch_name)
 
         # See which components use this branch.
         if state.i == 0:
@@ -401,6 +371,8 @@ class _NamedSemaphore:
     def release(self):
         fcntl.flock(self.handle, fcntl.LOCK_UN)
         self.handle.close()
+        time.sleep(0.1)
+        os.remove(self.path)
 
 class EngineLock:
     # Allow _NamedSemaphore to be used in python's "with" block.

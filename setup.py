@@ -6,7 +6,7 @@ REQUIRED_LAYOUT_EXPLANATION = '''
 This app is designed to be used with the following folder layout:
 
 $GMUX_ROOT/bin   -- all the code for the app; where $MAIN_MODULE resides.
-$GMUX_ROOT/repos -- all the repos that we'll work with.
+$GMUX_ROOT/data  -- all the repos that we'll work with.
 $GMUX_ROOT/etc   -- config files.
 '''
 
@@ -238,19 +238,19 @@ def define_components(nru):
     default_shared_cfg_repo = get_shared_cfg_repo_from_code_repo(get_code_remote())
 
     cfg = config.cfg
-    SECTION = 'misc'
-    KEY = 'shared cfg repo'
+    SECTION = config.MISC_SECTION
+    KEY = config.SHARED_CONFIG_REPO_KEY
     shared_cfg_repo = cfg.try_get(SECTION, KEY, default_shared_cfg_repo)
     local_shared_cfg_folder = os.path.join(data_folder, config.SHARED_CFG_REPO_NAME)
 
-    if not os.path.isdir(data_folder):
-        do_or_die('mkdir -p %s' % data_folder, as_user=nru)
+    if not os.path.isdir(config.DATA_FOLDER):
+        do_or_die('mkdir -p %s' % config.DATA_FOLDER, as_user=nru)
 
     repeat = True
     while repeat:
         repeat = False
         shared_cfg_repo = ui.prompt('Repo where components are defined, or "none"?', default=shared_cfg_repo)
-        cfg.set_all('misc', 'shared cfg repo', shared_cfg_repo)
+        cfg.set_all(config.MISC_SECTION, config.SHARED_CONFIG_REPO_KEY, shared_cfg_repo)
         if shared_cfg_repo.lower() != 'none':
             if os.path.isdir(os.path.join(local_shared_cfg_folder, '.git')):
                 with WorkingDir(local_shared_cfg_folder):
@@ -272,7 +272,7 @@ def define_components(nru):
 
     # Now ask the user which components they want to work with.
     muxed = ''
-    SECTION = 'muxed components'
+    SECTION = config.MUXED_COMPONENTS_SECTION
     if cfg.has_section(SECTION):
         muxed_items = cfg.items(SECTION)
         if muxed_items:
@@ -437,8 +437,9 @@ def run(audit_only=False):
         else:
 
             # We need to do the rest of the setup as the unprivileged user
-            # instead of as root. But we need to have a config file that's
-            # owned by the non-root user.
+            # instead of as root, but my testing with os.setuid() and similar
+            # functions wasn't promising. Instead, just create files as
+            # the unprivileged user, and then edit them as root.
             if not os.path.isdir(config.CONFIG_FOLDER):
                 do_or_die('mkdir -p %s' % config.CONFIG_FOLDER, as_user=nru)
             if not os.path.isfile(config.CONFIG_FQPATH):
@@ -447,6 +448,9 @@ def run(audit_only=False):
             update_app(nru)
             define_components(nru)
             define_branches()
+            if not exit_code:
+                config.cfg.set(config.MISC_SECTION, config.SETUP_SUCCESS_DATE_KEY,
+                               time.strftime('%Y-%m-%d %H:%M:%SZ', time.gmtime()))
             config.cfg.save()
 
         # Summarize what happened.
