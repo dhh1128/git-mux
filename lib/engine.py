@@ -1,7 +1,6 @@
 import os, time, sys, fcntl, re, inspect
 
-import config
-from ui import *
+import config, ui
 
 _LOCAL_DATA_REPO = os.path.join(config.DATA_FOLDER, '.git-mux-data')
 _REPO_ROOT = config.DATA_FOLDER
@@ -12,10 +11,14 @@ _VALID_BRANCH_TYPES_PAT = re.compile('^(?:feature|release|hotfix)$')
 _VALID_BRANCH_NAMES_PAT = re.compile('[a-z]+(?:[-a-z]*[a-z])?$')
 _SCRATCH_BRANCH_NAME = 'scratch'
 
+def die(problem):
+    ui.eprintc(problem, ui.ERROR_COLOR)
+    sys.exit(1)
+
 try:
     import git as gitpython
 except:
-    eprintc('Unable to import git support module. Please run "sudo easy_install gitpython" and retry.')
+    die('Unable to import git support module. Please run "sudo easy_install gitpython" and retry.')
 
 class Engine:
 
@@ -172,7 +175,7 @@ class Engine:
         # Validate some input.
         branches = self.get_branches()
         if not state.full_branch_name in branches.by_branch_name:
-            raise Exception('Branch "%s" is not recognized.' % state.full_branch_name)
+            raise Exception('Branch "%s" is not recognized.' % ste.full_branch_name)
 
         # See which components use this branch.
         if state.i == 0:
@@ -201,14 +204,13 @@ class Engine:
             return None, None, None
 
     def _flow_pull(self, state, component_name, git, *args):
-        # This command takes slightly different syntax than the others; it wants a
+        # The git-flow pull command takes slightly different syntax than the others; it wants a
         # git remote before the named branch. To accommodate that but still use our
         # normal parsing logic, we have to do a little fiddling.
-        args = list(*args)
+        args = list(args)
         named_args = [arg for arg in args if not arg.startswith('-')]
-        print('args = %s; named_args = %s' % (args, named_args))
         if len(named_args) != 4:
-            raise Exception('Expected "flow <branch_type> pull [-r] <remote> <name>".')
+            die('Expected "git mux flow <branch_type> pull [-r] <remote> <branchname>". Do you want the "origin" remote?')
         else:
             remote = named_args[2]
             args.remove(remote)
@@ -221,6 +223,10 @@ class Engine:
             return exit_code, stdout, stderr
 
     def _flow_push(self, state, component_name, git, *args):
+        named_args = [arg for arg in args if not arg.startswith('-')]
+        if len(named_args) != 3:
+            die('Expected "git mux flow <branch_type> push <branchname>". Push is always to origin.')
+
         self._prep_for_existing_branch(state, *args)
 
         if component_name in state.components_with_branch:
@@ -275,12 +281,15 @@ class Engine:
             print('unknown')
             return
         elif first == 'init':
-            raise Exception("Can't mux an init across components; init is inherently a single-component operation.")
+            die("Can't mux an init across components; init is inherently a single-component operation.")
         else:
             if not _VALID_BRANCH_TYPES_PAT.match(first):
-                raise Exception("Can't handle \"%s\" branches right now." % first)
+                die("Can't handle \"%s\" branches right now." % first)
             verb = args[1]
-            func = getattr(self, '_flow_' + verb)
+            try:
+                func = getattr(self, '_flow_' + verb)
+            except:
+                die(ui.CMD_COLOR + 'git mux flow ' + first + ' ' + ui.PARAM_COLOR + verb + ui.ERROR_COLOR + ' is an invalid command.' + ui.NORMTXT)
 
             class State:
                 def __init__(self):
@@ -290,7 +299,7 @@ class Engine:
             for c in self.get_components():
                 component_name = c['name']
                 line_width = 30 - len(component_name)
-                printc('\n' + PARAM_COLOR + component_name + DELIM_COLOR + ' ' + '-'*line_width + NORMTXT)
+                ui.printc('\n' + ui.PARAM_COLOR + component_name + ui.DELIM_COLOR + ' ' + '-'*line_width + ui.NORMTXT)
                 git = self._get_component_git(component_name)
                 try:
                     result = func(state, component_name, git, *args)
@@ -299,7 +308,7 @@ class Engine:
                         if exit_code:
                             if not stderr:
                                 stderr = 'git flow command failed'
-                            eprintc(stderr, ERROR_COLOR)
+                            ui.eprintc(stderr, ui.ERROR_COLOR)
                         elif stdout:
                             print(stdout)
                     state.i += 1
@@ -319,9 +328,9 @@ class Engine:
     def retire(self, branch):
         which = _find_by_name(self.get_branches(), branch, 'Branch')
         if branch in [b['name'] for b in self.get_branches(lambda b: b['name'] in _PROTECTED_BRANCHES)]:
-            raise Exception('Branch "%s" is protected.' % branch)
+            die('Branch "%s" is protected.' % branch)
         if branch not in [b['name'] for b in self.get_branches(lambda b: b['status'] == 'active')]:
-            raise Exception('Branch "%s" is not active.' % branch)
+            die('Branch "%s" is not active.' % branch)
         which['status'] = 'retired'
         with EngineLock():
             self._update_file(_BRANCHES_FILE, self._branches, 'retire %s branch' % branch)
@@ -329,7 +338,7 @@ class Engine:
     def revive(self, branch):
         which = _find_by_name(self.get_branches(), branch, 'Branch')
         if branch not in [b['name'] for b in self.get_branches(lambda b: b['status'] == 'retired')]:
-            raise Exception('Branch "%s" is not retired.' % branch)
+            die('Branch "%s" is not retired.' % branch)
         which['status'] = 'active'
         with EngineLock():
             self._update_file(_BRANCHES_FILE, self._branches, 'revive %s branch' % branch)
@@ -337,7 +346,7 @@ class Engine:
     def refresh(self):
         which = _find_by_name(self.get_branches(), branch, 'Branch')
         if branch not in [b['name'] for b in self.get_branches(lambda b: b['status'] == 'retired')]:
-            raise Exception('Branch "%s" is not retired.' % branch)
+            die('Branch "%s" is not retired.' % branch)
         which['status'] = 'active'
         with EngineLock():
             self._update_file(_BRANCHES_FILE, self._branches, 'revive %s branch' % branch)

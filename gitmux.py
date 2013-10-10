@@ -100,7 +100,7 @@ def dispatch(symbols, args):
                 if err:
                     return err
             else:
-                ui.eprintc('Unrecognized command "%s". Try "%s help" for syntax.' % (func, APP_CMD), ui.ERROR_COLOR)
+                ui.eprintc('Unrecognized command "%s". Try "%s help" for syntax.' % (func, 'git mux help'), ui.ERROR_COLOR)
                 return 1
         except KeyboardInterrupt:
             # Allow CTRL+C to kill loop
