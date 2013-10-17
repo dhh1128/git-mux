@@ -1,4 +1,4 @@
-import os, subprocess, time, traceback, sys, re, ConfigParser
+import os, subprocess, time, traceback, sys, re, ConfigParser, shutil
 
 from lib import ui, config
 
@@ -252,16 +252,29 @@ def define_components(nru):
         shared_cfg_repo = ui.prompt('Repo where components are defined, or "none"?', default=shared_cfg_repo)
         cfg.set_all(config.MISC_SECTION, config.SHARED_CONFIG_REPO_KEY, shared_cfg_repo)
         if shared_cfg_repo.lower() != 'none':
+            should_clone = True
             if os.path.isdir(os.path.join(local_shared_cfg_folder, '.git')):
+                origin = None
                 with WorkingDir(local_shared_cfg_folder):
+                    origin = None
+                    stdout = do_or_die('git remote -v')
+                    print(stdout)
+                    pat = re.compile(r'^origin\s+(.*?)\s+\(fetch\)')
+                    m = pat.match(stdout)
+                    if m:
+                        origin = m.group(1)
+                if origin == shared_cfg_repo:
                     do_or_die('git pull', as_user=nru)
-            else:
+                    should_clone = False
+                else:
+                    shutil.rmtree(local_shared_cfg_folder)
+
+            if should_clone:
                 # Can't clone into a non-empty folder. Make sure we don't have
                 # that case.
                 if os.path.isdir(local_shared_cfg_folder):
                     if os.listdir(local_shared_cfg_folder):
                         die('%s is not empty; unsafe to store git clone. Clean out and retry.' % local_shared_cfg_folder)
-                    os.rmdir(local_shared_cfg_folder)
 
                 with WorkingDir(data_folder):
                     exit_code, stdout, stderr = do('git clone %s %s' % (shared_cfg_repo, config.SHARED_CFG_REPO_NAME), as_user=nru)
