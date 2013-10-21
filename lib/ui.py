@@ -141,14 +141,15 @@ def prompt_bool(msg, default=None):
            or 'n' is received. Otherwise, use this value when user presses
            Enter.
     '''
+    msg = PROMPT_COLOR + msg + NORMTXT
+    if default is None:
+        msg += ' (y/n) '
+    elif default:
+        msg += ' (Y/n) '
+    else:
+        msg += ' (y/N) '
     while True:
-        sys.stdout.write(msg)
-        if default is None:
-            sys.stdout.write(' (y/n) ')
-        elif default:
-            sys.stdout.write(' (Y/n) ')
-        else:
-            sys.stdout.write(' (y/N) ')
+        writec(msg)
         answer = sys.stdin.readline().strip().lower()
         if not answer or (not (answer[0] in ['y','n'])):
             if not (default is None):

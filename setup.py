@@ -174,18 +174,22 @@ def setup_git_flow(audit_only=False):
         print('git-flow is installed')
     return 0
 
-def setup_cache_helper(audit_only, nru):
+def setup_stored_credential_helper(audit_only, nru):
     report_step('git credential.helper')
     git_cfg = get_git_config(nru)
     helper = git_cfg.get('credential.helper', '')
-    if 'cache' not in helper and 'store' not in helper:
-        do_or_die('git config --global credential.helper cache', as_user=nru)
+    if 'store' not in helper:
         if helper or audit_only:
-            return complain('Git credential.helper is "%s", which will not work for muxing.\n' +
-                            'Setting credential.helper to "cache" saves passwords in RAM for a few minutes;\n' +
-                            'Setting it to "store" saves them in files permanently.\n' +
-                            'Run "git config --global credential.helper cache" or "...store".' % helper)
-    print('git credential.helper is set to cache or store.')
+            return complain('Git credential.helper is "%s", which will not work for muxing.\n' % helper +
+                            'Setting credential.helper to "store" remembers passwords.\n' +
+                            'Run "git config --global credential.helper store".')
+        do_or_die('git config --global credential.helper store', as_user=nru)
+    print('Git mux requires you to manually store credentials for each of your repos\n' +
+          'before you mux, to avoid interactive prompts in the middle of a mux workflow.\n' +
+          'You can store credentials by running "git ls-remote" on each repo.\n')
+    if not ui.prompt_bool('Are git credentials saved for all repos you need?', default=False):
+        return complain('Git mux doesn\'t allow interactive password prompts scattered through a workflow.')
+    print('git credential.helper is set to store.')
     return 0
 
 def get_shared_cfg_repo_from_code_repo(code_repo):
@@ -196,7 +200,7 @@ def get_code_remote():
     global _code_remote
     if _code_remote is None:
         with WorkingDir(config.BIN_FOLDER):
-            remotes = do_or_die('cd %s && git remote -v' % config.BIN_FOLDER, as_user=get_non_root_user()).strip().split('\n')
+            remotes = do_or_die('git remote -v', as_user=get_non_root_user()).strip().split('\n')
             _code_remote = re.split('\s+', remotes[0])[1]
     return _code_remote
 
@@ -243,61 +247,6 @@ You may also use the keyword "all" to manage all git-flow style branches, or
         selected = 'mine'
     cfg.set_all(SECTION, KEY, selected)
     
-_nrh = None
-def get_non_root_home():
-    global _nrh
-    if not _nrh:
-        stdout = do_or_die('export | grep -e "\WHOME="', as_user=get_non_root_user())
-        m = re.match(r'HOME="(.*?)"', stdout)
-        if m:
-            _nrh = m.group(1)
-        else:
-            likely = '/home/%s' % get_non_root_user()
-            if os.getcwd().startswith(likely):
-                _nrh = likely
-            else:
-                die('Unable to find home dir for non-root user.')
-    return _nrh
-
-_remote_pat = re.compile(r'(.*?)://([^/@]+@)?([^/]+)')
-def split_git_remote(remote):
-    m = _remote_pat.match(remote)
-    if m:
-        return m.group(1), m.group(2), m.group(3)
-    return None, None, None
-
-_cached_credentials = {}
-def cache_credentials_as_needed(remote, nru=None):
-    global _cached_credentials
-    protocol, credentials, host = split_git_remote(remote)
-    if not credentials and protocol.startswith('http'):
-        if host not in _cached_credentials:
-            # See if we already have the credentials cached or stored.
-            exit_code, stdout, stderr = do('git ls-remote %s' % remote, as_user=nru)
-            if exit_code:
-                git_cfg = get_git_config(nru)
-                username_key = 'credential.%s://%s.username' % (protocol, host)
-                username = git_cfg.get(username_key, '')
-                if not username:
-                    while not username:
-                        username = ui.prompt('Username for %s?' % host, default=nru)
-                    do_or_die('git config --global credential.%s://%s.username %s' % (protocol, host, username), as_user=nru)
-                password = None
-                while not password:
-                    password = ui.prompt('Password for %s on %s?' % (username, host), readline=ui.read_masked)
-                fd, path = tempfile.mkstemp()
-                os.close(fd)
-                with open(path, 'w') as f:
-                    f.write("echo %s\n" % password)
-                do_or_die('chown %s %s' % (nru, path))
-                do_or_die('chmod +x %s' % path)
-                try:
-                    do_or_die('export GIT_ASKPASS="%s" && git ls-remote "%s"; unset GIT_ASKPASS' % (path, remote), as_user=nru)
-                finally:
-                    os.remove(path)
-            else:
-                _cached_credentials[host] = True
-    
 def get_git_config(nru=None):
     cfg = {}
     lines = do_or_die('git config --list', as_user=nru).split('\n')
@@ -335,13 +284,15 @@ def define_components(nru):
             should_clone = True
             if os.path.isdir(os.path.join(local_shared_cfg_folder, '.git')):
                 origin = None
-                stdout = do_or_die('cd %s && git remote -v' % local_shared_cfg_folder)
+                with WorkingDir(local_shared_cfg_folder):
+                    stdout = do_or_die('git remote -v')
                 pat = re.compile(r'^origin\s+(.*?)\s+\(fetch\)')
                 m = pat.match(stdout)
                 if m:
                     origin = m.group(1)
                 if origin == shared_cfg_repo:
-                    do_or_die('cd %s && git pull' % local_shared_cfg_folder, as_user=nru)
+                    with WorkingDir(local_shared_cfg_folder):
+                        do_or_die('git pull', as_user=nru)
                     should_clone = False
                 else:
                     shutil.rmtree(local_shared_cfg_folder)
@@ -355,7 +306,7 @@ def define_components(nru):
 
                 cache_credentials_as_needed(shared_cfg_repo, nru)
                 with WorkingDir(data_folder):
-                    exit_code, stdout, stderr = do('cd %s && git clone "%s" %s' % (data_folder, shared_cfg_repo, config.SHARED_CFG_REPO_NAME), as_user=nru)
+                    exit_code, stdout, stderr = do('git clone "%s" %s' % (data_folder, shared_cfg_repo, config.SHARED_CFG_REPO_NAME), as_user=nru)
                     if exit_code:
                         stderr = re.sub('\n{2,}', '\n', stderr.strip())
                         ui.eprintc('Unable to clone %s.\n%s' % (shared_cfg_repo, stderr), ui.ERROR_COLOR)
@@ -518,7 +469,7 @@ def run(audit_only=False):
         if not exit_code:
             exit_code += setup_git_python(audit_only)
             exit_code += setup_git_flow(audit_only)
-            exit_code += setup_cache_helper(audit_only, nru)
+            exit_code += setup_stored_credential_helper(audit_only, nru)
 
         exit_code += setup_folder_layout(audit_only)
         exit_code += setup_app_cloned(audit_only)
@@ -526,7 +477,7 @@ def run(audit_only=False):
 
         if audit_only:
             exit_code += check_components()
-        else:
+        elif not exit_code:
 
             # We need to do the rest of the setup as the unprivileged user
             # instead of as root, but my testing with os.setuid() and similar
