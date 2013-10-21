@@ -228,6 +228,78 @@ You may also use the keyword "all" to manage all git-flow style branches, or
     elif 'mine' in selected and len(selected) == 1:
         selected = 'mine'
     cfg.set_all(SECTION, KEY, selected)
+    
+_nrh = None
+def get_non_root_home():
+    global _nrh
+    if not _nrh:
+        stdout = do_or_die('export | grep -e "\WHOME="', as_user=get_non_root_user())
+        m = re.match(r'HOME="(.*?)"', stdout)
+        if m:
+            _nrh = m.group(1)
+        else:
+            likely = '/home/%s' % get_non_root_user()
+            if os.getcwd().startswith(likely):
+                _nrh = likely
+            else:
+                die('Unable to find home dir for non-root user.')
+    return _nrh
+    
+
+_machine_pat = re.compile('\Wmachine\s+([^ \t\r\n]+)')
+_login_pat = re.compile('\Wlogin\s+([^ \t\r\n]+)')
+_password_pat = re.compile('\Wpassword\s+([^ \t\r\n]+)')
+def _get_netrc_info_for_host(host, lines):
+    for line in lines:
+        if not line.startswith('#'):
+            m = _machine_pat.search(line)
+            if m:
+                if m.group(1) == host:
+                    login = _login_pat.search(line)
+                    if login:
+                        login = login.group(1)
+                    password = _login_pat.search(line)
+                    if password:
+                        password = login.group(1)
+                    return login, password
+
+_cached_credentials = None
+def cache_credentials_as_needed(host, nru):
+    global _cached_credentials
+    netrc = '%s/.netrc' % get_non_root_home()
+    if _cached_credentials is None:
+        if os.path.isfile(netrc):
+            with open(netrc, 'r') as f:
+                lines = f.readlines()
+            _cached_credentials = [line.strip() for line in lines]
+        else:
+            _cached_credentials = []
+    cached = _get_netrc_info_for_host(host, _cached_credentials)
+    login = None
+    if cached:
+        if cached[1]:
+            return
+        else:
+            login = cached[0]
+    lines = [line for line in _cached_credentials if not _get_netrc_info_for_host(host, _cached_credentials)]
+    while not login:
+        login = ui.prompt('Username for %s?' % host)
+    password = None
+    while not password:
+        password = ui.prompt('Password for %s on %s?' % (login, host), readline=ui.read_masked)
+    lines.append('machine %s\nlogin %s\npassword %s' % (host, login, password))
+    lines = '\n'.join(lines)
+    with open(netrc, 'w') as f:
+        f.write(lines)
+    do_or_die('chown %s %s' % (nru, netrc))
+    do_or_die('chmod 0600 %s' % netrc)
+    
+_remote_pat = re.compile('^([-+_a-zA-Z]+)://([^/@]+@)?([^/]+)/')
+def split_git_remote(remote):
+    m = _remote_pat.match(remote)
+    if m:
+        return m.group(1), m.group(2), m.group(3)
+    return None, None, None
 
 def define_components(nru):
     report_step('define components')
@@ -276,6 +348,9 @@ def define_components(nru):
                     if os.listdir(local_shared_cfg_folder):
                         die('%s is not empty; unsafe to store git clone. Clean out and retry.' % local_shared_cfg_folder)
 
+                protocol, credentials, host = split_git_remote(shared_cfg_repo)
+                if not credentials and protocol.startswith('http'):
+                    cache_credentials_as_needed(host, nru)
                 with WorkingDir(data_folder):
                     exit_code, stdout, stderr = do('git clone %s %s' % (shared_cfg_repo, config.SHARED_CFG_REPO_NAME), as_user=nru)
                     if exit_code:

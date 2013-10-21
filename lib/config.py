@@ -32,6 +32,9 @@ SETUP_SUCCESS_DATE_KEY = 'successful setup date'
 SHARED_CONFIG_REPO_KEY = 'shared cfg repo'
 MUXED_COMPONENTS_SECTION = 'muxed components'
 
+# Potential bug: if we're running as root, but we want the home drive for the non-
+# privileged user that temporarily elevated to root, this will not work. The setup
+# script compensates.
 CYGWIN = False
 if os.name == 'nt':
     HOMEDIR = os.path.join(os.getenv("HOMEDRIVE"), os.getenv("HOMEPATH"))

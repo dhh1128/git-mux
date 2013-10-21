@@ -1,4 +1,4 @@
-import sys, re, os
+import sys, re, os, tty, termios
 
 import cmd
 
@@ -56,6 +56,32 @@ for c in cmd.commands():
     params = params.replace(' do ', ' ' + CMD_COLOR + 'do' + PARAM_COLOR + ' ')
     syntax = CMD_COLOR + c.abbrev + NORMTXT + c.verb[len(c.abbrev):] + PARAM_COLOR + params
     MENU += syntax + DELIM_COLOR + '- ' + NORMTXT + c.descrip + '\n'
+    
+def getch():
+    fd = sys.stdin.fileno()
+    old_settings = termios.tcgetattr(fd)
+    try:
+        tty.setraw(sys.stdin.fileno())
+        ch = sys.stdin.read(1)
+    finally:
+        termios.tcsetattr(fd, termios.TCSADRAIN, old_settings)
+    return ch
+    
+def read_masked():
+    value = ''
+    while True:
+        c = getch()
+        if (c == '\n') or (c == '\r') or (c == '\x1B'):
+            print('')
+            break
+        elif (c == '\x08'):
+            if len(value) > 0:
+                value = value[:-1]
+                sys.stdout.write('\b \b')
+        else:
+            value += c
+            sys.stdout.write('*')
+    return value
 
 def prompt(msg, choices=None, default='', normfunc=None, readline=None):
     '''
