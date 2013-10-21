@@ -304,9 +304,8 @@ def define_components(nru):
                     if os.listdir(local_shared_cfg_folder):
                         die('%s is not empty; unsafe to store git clone. Clean out and retry.' % local_shared_cfg_folder)
 
-                cache_credentials_as_needed(shared_cfg_repo, nru)
                 with WorkingDir(data_folder):
-                    exit_code, stdout, stderr = do('git clone "%s" %s' % (data_folder, shared_cfg_repo, config.SHARED_CFG_REPO_NAME), as_user=nru)
+                    exit_code, stdout, stderr = do('git clone "%s" %s' % (shared_cfg_repo, config.SHARED_CFG_REPO_NAME), as_user=nru)
                     if exit_code:
                         stderr = re.sub('\n{2,}', '\n', stderr.strip())
                         ui.eprintc('Unable to clone %s.\n%s' % (shared_cfg_repo, stderr), ui.ERROR_COLOR)
