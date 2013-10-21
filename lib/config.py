@@ -51,6 +51,7 @@ class MyConfigParser(ConfigParser.SafeConfigParser):
             path = CONFIG_FQPATH
         self.path = path
         if os.path.isfile(self.path):
+            print('Loading config from %s...' % self.path)
             self.read(self.path)
     def add_section_if_missing(self, section):
         if not self.has_section(section):

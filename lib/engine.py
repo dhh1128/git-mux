@@ -58,7 +58,7 @@ class Engine:
             b = Engine.Branches()
             for c in self.get_components():
                 component_name = c['name']
-                git = self._get_component_git(c['name'])
+                git = self._get_git_instance_for_component(c['name'])
                 stdout = git.branch()
                 items = [x.strip() for x in stdout.strip().split('\n')]
                 scratch_found = False
@@ -90,6 +90,7 @@ class Engine:
                 c.append({'name': i[0], 'url': i[1]})
             c.sort(key=lambda x: x['name'])
             self._components = c
+            print('Engine._components = %s' % str(self._components))
         return self._components
 
     def add_component_to_branch(self, component, branch):
@@ -97,39 +98,29 @@ class Engine:
         _find_by_name(self.get_branches(), branch, 'Branch')
         print('to do: finish stub')
 
-    def _get_component_git(self, name):
-        path = os.path.join(_REPO_ROOT, name)
+    def _get_git_instance_for_component(self, component_name):
+        path = os.path.join(_REPO_ROOT, component_name)
         if not os.path.isdir(path):
-            component = self._find_component_by_name(name)
-            sys.stderr.write('Fetching %s repo for the first time...\n' % name)
+            # Lookup component by component_name in our internal table.
+            component = self._find_component_by_name(component_name)
             os.makedirs(path)
+            sys.stderr.write('Fetching %s repo to %s for the first time...\n' % (component_name, path))
             git = gitpython.Git(path)
-            if False:
-                # We start out mirroring the remote repo because we want to pick up
-                # all the branches it has. This implies --bare. However, we can't
-                # use git flow on a bare repo, so we do a little black magic here.
-                # Instead of going to the raw folder, we clone into a .git folder,
-                # and then we undo its "bareness". Lastly, we undo the mirroring.
-                # This allows us to call git flow on the result.
-                git.clone(component['url'], '.git', '--mirror')
-                git.config('--bool', 'core.bare', 'false')
-                git.config('--bool', 'remote.origin.mirror', 'false')
-                git.flow('init', '-d')
-                git.config('branch.develop.remote', 'origin/develop')
-                git.config('branch.master.remote', 'origin/master')
-            else:
-                git.clone(component['url'], '.')
-                git.flow('init', '-d')
-                # git flow assumes you'll have only local copies of feature
-                # branches. We want to link ours to what's on the remote...
-                remote_branches = [x.strip() for x in git.branch('-a').strip().split('\n')]
-                remote_branches = [x[15:] for x in remote_branches if x.startswith('remotes/origin/') and '/' in x]
-                remote_branches = [x for x in remote_branches if _VALID_BRANCH_TYPES_PAT.match(x[0:x.find('/')])]
-                for rb in remote_branches:
-                    git.checkout('-b', rb, 'origin/%s' % rb)
+            git.clone(component['url'], '.')
+            sys.stderr.write('Calling git flow init...\n' % (component_name, path))
+            git.flow('init', '-d')
+            # git flow assumes you'll have only local copies of feature
+            # branches. We want to link ours to what's on the remote...
+            remote_branches = [x.strip() for x in git.branch('-a').strip().split('\n')]
+            remote_branches = [x[15:] for x in remote_branches if x.startswith('remotes/origin/') and '/' in x]
+            remote_branches = [x for x in remote_branches if _VALID_BRANCH_TYPES_PAT.match(x[0:x.find('/')])]
+            for rb in remote_branches:
+                sys.stderr.write('Checking out remote branch %s...\n' % rb)
+                git.checkout('-b', rb, 'origin/%s' % rb)
 
             git.branch(_SCRATCH_BRANCH_NAME)
         else:
+            sys.stderr.write('Using %s in %s.' % (component_name, path))
             git = gitpython.Git(path)
         return git
 
@@ -300,7 +291,7 @@ class Engine:
                 component_name = c['name']
                 line_width = 30 - len(component_name)
                 ui.printc('\n' + ui.PARAM_COLOR + component_name + ui.DELIM_COLOR + ' ' + '-'*line_width + ui.NORMTXT)
-                git = self._get_component_git(component_name)
+                git = self._get_git_instance_for_component(component_name)
                 try:
                     result = func(state, component_name, git, *args)
                     if result:
