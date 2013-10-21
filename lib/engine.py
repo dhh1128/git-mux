@@ -107,7 +107,7 @@ class Engine:
             sys.stderr.write('Fetching %s repo to %s for the first time...\n' % (component_name, path))
             git = gitpython.Git(path)
             git.clone(component['url'], '.')
-            sys.stderr.write('Calling git flow init...\n' % (component_name, path))
+            sys.stderr.write('Calling git flow init...\n')
             git.flow('init', '-d')
             # git flow assumes you'll have only local copies of feature
             # branches. We want to link ours to what's on the remote...
@@ -120,7 +120,7 @@ class Engine:
 
             git.branch(_SCRATCH_BRANCH_NAME)
         else:
-            sys.stderr.write('Using %s in %s.' % (component_name, path))
+            sys.stderr.write('Using %s in %s.\n' % (component_name, path))
             git = gitpython.Git(path)
         return git
 
