@@ -71,13 +71,16 @@ def read_masked():
     value = ''
     while True:
         c = getch()
-        if (c == '\n') or (c == '\r') or (c == '\x1B'):
+        cval = ord(c)
+        if cval == 13 or cval == 10 or cval == 0x1B:
             print('')
             break
-        elif (c == '\x08'):
+        elif cval == 8 or cval == 127:
             if len(value) > 0:
                 value = value[:-1]
                 sys.stdout.write('\b \b')
+        elif cval == 3:
+            raise KeyboardInterrupt() 
         else:
             value += c
             sys.stdout.write('*')
