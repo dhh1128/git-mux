@@ -166,7 +166,7 @@ class Engine:
         # Validate some input.
         branches = self.get_branches()
         if not state.full_branch_name in branches.by_branch_name:
-            raise Exception('Branch "%s" is not recognized.' % ste.full_branch_name)
+            raise Exception('Branch "%s" is not recognized.' % state.full_branch_name)
 
         # See which components use this branch.
         if state.i == 0:
