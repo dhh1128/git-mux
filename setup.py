@@ -156,6 +156,8 @@ def setup_git_python(audit_only=False):
             return complain('gitpython is not installed')
         print('installing gitpython')
         do_or_die('easy_install gitpython', explanation='Need gitpython to be installed.')
+        ui.printc('Must restart python to be able to use gitpython module.', ui.WARNING_COLOR)
+        sys.exit(0)
     return 0
 
 def setup_git_flow(audit_only=False):
@@ -437,14 +439,35 @@ def update_app(nru):
     else:
         if stdout.find('ahead of origin') > -1:
             ui.eprintc('Reminder: you have changes to %s that need to be pushed.' % config.APP_NAME, ui.WARNING_COLOR)
-        # Safe to pull. Can't use "git pull" here because we're running as root and
-        # we want to pull as normal user.
+        # Safe to pull. Can't use git.pull() here because we're running as root and
+        # we want to pull as normal user. Instead we run a shell command.
         with WorkingDir(config.BIN_FOLDER):
             exit_code, stdout, stderr = do('git pull', as_user=nru)
             if stdout.find('lready up-to-date') == -1:
                 print(stdout)
                 die('%s was out of date; re-run setup with new version.' % config.APP_NAME)
     print('no remote changes to worry about')
+    
+def setup_ancillary_tools(audit_only=False):
+    report_step('ancillary tools')
+    installer = get_installer()
+    packages = 'python-setuptools python-dev build-essential'
+    if installer == 'yum':
+        packages = 'python-setuptools python-devel gcc-c++'
+    exit_code = 0
+    ec, stdout, stderr = do('which easy_install')
+    exit_code += ec
+    ec, stdout, stderr = do('which g++')
+    exit_code += ec
+    ec, stdout, stderr = do('which make')
+    exit_code += ec
+    if exit_code:
+        if audit_only:
+            return complain('At least one of the following packages is not installed: %s' % packages)
+        else:
+            do_or_die('%s -y install %s' % (installer, packages), explanation='Ancillary tools needed.')
+    print('required tools are present')
+    return 0
 
 def run(audit_only=False):
     exit_code = 0
@@ -463,6 +486,7 @@ def run(audit_only=False):
                 die('Must run setup as root user.')
 
         exit_code += setup_git(audit_only)
+        exit_code += setup_ancillary_tools(audit_only)
 
         # Only check gitpython and git-flow if git's working.
         if not exit_code:
