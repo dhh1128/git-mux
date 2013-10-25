@@ -2,6 +2,12 @@ import os, subprocess, time, traceback, sys, re, ConfigParser, shutil, tempfile
 
 from lib import ui, config
 
+isWindows = sys.platform=="win32" or sys.platform=="cygwin"
+if isWindows:
+    whichCommand = 'where'
+else:
+    whichCommand = 'which'
+
 REQUIRED_LAYOUT_EXPLANATION = '''
 This app is designed to be used with the following folder layout:
 
@@ -55,7 +61,7 @@ _non_root_user = None
 def get_non_root_user():
     global _non_root_user
     if _non_root_user is None:
-        if os.getegid() == 0:
+        if not isWindows and os.getegid() == 0:
             report_step('identify non-root user')
             _non_root_user = check_ownership()
             if _non_root_user == 'root':
@@ -68,10 +74,10 @@ def get_non_root_user():
 _installer = None
 def get_installer():
     global _installer
-    if _installer is None:
-        exit_code, stdout, stderr = do('which yum')
+    if not isWindows and _installer is None:
+        exit_code, stdout, stderr = do(whichCommand+' yum')
         if exit_code:
-            do_or_die('which apt-get')
+            do_or_die(whichCommand+' apt-get')
             _installer = 'apt-get'
         else:
             _installer = 'yum'
@@ -83,7 +89,7 @@ def die(msg):
 
 def do(cmd, as_user=None):
     if as_user:
-        if os.getegid() == 0:
+        if not isWindows and os.getegid() == 0:
             cmd = 'su %s -c "%s"' % (as_user, cmd.replace('"', '\\"'))
     ui.printc(cmd, ui.SUBTLE_COLOR)
     proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, shell=True)
@@ -162,7 +168,7 @@ def setup_git_python(audit_only=False):
 
 def setup_git_flow(audit_only=False):
     report_step('git-flow')
-    exit_code, stdout, stderr = do('which git-flow')
+    exit_code, stdout, stderr = do(whichCommand+'git-flow')
     if exit_code:
         if audit_only:
             return complain('git-flow is not installed')
@@ -401,7 +407,7 @@ def setup_path(audit_only=False):
         # Right now I can't figure out how to test the path of the non-root user.
         # Every experiment I attempt fails. I've tried os.setuid(), su <user> -c which,
         # runuser, etc...
-        if os.getegid() != 0:
+        if not isWindows and os.getegid() != 0:
             do_or_die('which %s' % config.APP_NAME)
     else:
         # We unconditionally remove any old symlink that's laying around,
@@ -449,17 +455,19 @@ def update_app(nru):
     print('no remote changes to worry about')
     
 def setup_ancillary_tools(audit_only=False):
+    if isWindows:
+        return 0
     report_step('ancillary tools')
     installer = get_installer()
     packages = 'python-setuptools python-dev build-essential'
     if installer == 'yum':
         packages = 'python-setuptools python-devel gcc-c++'
     exit_code = 0
-    ec, stdout, stderr = do('which easy_install')
+    ec, stdout, stderr = do(whichCommand+' easy_install')
     exit_code += ec
-    ec, stdout, stderr = do('which g++')
+    ec, stdout, stderr = do(whichCommand+' g++')
     exit_code += ec
-    ec, stdout, stderr = do('which make')
+    ec, stdout, stderr = do(whichCommand+' make')
     exit_code += ec
     if exit_code:
         if audit_only:
@@ -474,8 +482,8 @@ def run(audit_only=False):
     try:
         # Check basic prerequisites, and fix them if appropriate.
 
-        # Verify correct security context.
-        as_root = os.getegid() == 0
+        # Verify correct security context (ignore check on windows)
+        as_root = isWindows or os.getegid() == 0
         if as_root:
             # This call will cause us to exit if we have problems.
             nru = get_non_root_user()

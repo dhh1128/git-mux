@@ -1,4 +1,7 @@
-import sys, re, os, tty, termios
+import sys, re, os
+isWindows = sys.platform == "win32" or sys.platform == "cygwin"
+if not isWindows:
+    import termios, tty
 
 import cmd
 
@@ -59,12 +62,15 @@ for c in cmd.commands():
     
 def getch():
     fd = sys.stdin.fileno()
-    old_settings = termios.tcgetattr(fd)
+    if sys.platform != "win32":
+        old_settings = termios.tcgetattr(fd)
     try:
-        tty.setraw(sys.stdin.fileno())
+        if not isWindows:
+            tty.setraw(sys.stdin.fileno())
         ch = sys.stdin.read(1)
     finally:
-        termios.tcsetattr(fd, termios.TCSADRAIN, old_settings)
+        if not isWindows:
+            termios.tcsetattr(fd, termios.TCSADRAIN, old_settings)
     return ch
     
 def read_masked():
