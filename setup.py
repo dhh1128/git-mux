@@ -168,9 +168,9 @@ def setup_git_python(audit_only=False):
 
 def setup_git_flow(audit_only=False):
     report_step('git-flow')
-    exit_code, stdout, stderr = do(whichCommand+'git-flow')
+    exit_code, stdout, stderr = do(whichCommand+' git-flow')
     if exit_code:
-        if audit_only:
+        if audit_only or isWindows:
             return complain('git-flow is not installed')
         print('installing git-flow')
         installer = get_installer()
@@ -281,8 +281,8 @@ def define_components(nru):
     local_shared_cfg_folder = os.path.join(data_folder, config.SHARED_CFG_REPO_NAME)
 
     if not os.path.isdir(config.DATA_FOLDER):
-        do_or_die('mkdir -p %s' % config.DATA_FOLDER, as_user=nru)
-
+        mkdir_os_specific(config.DATA_FOLDER, nru)
+		
     repeat = True
     while repeat:
         repeat = False
@@ -403,7 +403,7 @@ def check_components():
 
 def setup_path(audit_only=False):
     report_step('%s is in path' % config.APP_NAME)
-    if audit_only:
+    if audit_only or isWindows:
         # Right now I can't figure out how to test the path of the non-root user.
         # Every experiment I attempt fails. I've tried os.setuid(), su <user> -c which,
         # runuser, etc...
@@ -476,6 +476,13 @@ def setup_ancillary_tools(audit_only=False):
             do_or_die('%s -y install %s' % (installer, packages), explanation='Ancillary tools needed.')
     print('required tools are present')
     return 0
+	
+def mkdir_os_specific(path, nru):
+    if isWindows:
+        os.makedirs(path)
+    else:
+        do_or_die('mkdir -p %s' % path, as_user=nru)
+    return 0
 
 def run(audit_only=False):
     exit_code = 0
@@ -515,7 +522,7 @@ def run(audit_only=False):
             # functions wasn't promising. Instead, just create files as
             # the unprivileged user, and then edit them as root.
             if not os.path.isdir(config.CONFIG_FOLDER):
-                do_or_die('mkdir -p %s' % config.CONFIG_FOLDER, as_user=nru)
+                mkdir_os_specific(config.CONFIG_FOLDER, nru)
             if not os.path.isfile(config.CONFIG_FQPATH):
                 do_or_die('touch %s' % config.CONFIG_FQPATH, as_user=nru)
 

@@ -1,6 +1,10 @@
-import os, time, sys, fcntl, re, inspect
+import os, time, sys, re, inspect
 
 import config, ui
+
+isWindows = sys.platform=="win32" or sys.platform=="cygwin"
+if not isWindows:
+	import fcntl
 
 _LOCAL_DATA_REPO = os.path.join(config.DATA_FOLDER, '.git-mux-data')
 _REPO_ROOT = config.DATA_FOLDER
