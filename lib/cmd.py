@@ -14,11 +14,7 @@ class Command:
 
 _CMDS = [
     Command('list [all] b|c',        'List muxed (or all) branches/components.'),
-    Command('refresh',               'Discover new remote meta data.'),
     Command('flow type action name', 'Run git flow on my components.'),
-    Command('include b|c name',      'Add branch/component to those I\'m muxing.'),
-    Command('exclude b|c name',      'Drop branch from those I\'m muxing.'),
-    Command('update',                'Apply latest patches to this tool.'),
     ]
 
 def _calc_abbrevs():
