@@ -147,6 +147,8 @@ class Engine:
 
         if component_name in state.components_with_branch:
             exit_code, stdout, stderr = None, 'Branch %s already started.' % full_branch_name, None
+            git.checkout(full_branch_name)
+            git.pull('origin', full_branch_name)
         else:
             exit_code, stdout, stderr = git.flow(*args, with_extended_output=True, with_exceptions=False)
             if not exit_code:
