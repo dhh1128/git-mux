@@ -111,6 +111,9 @@ class Engine:
             sys.stderr.write('Fetching %s repo to %s for the first time...\n' % (component_name, path))
             git = gitpython.Git(path)
             git.clone(component['url'], '.')
+            sys.stderr.write('Making sure we have the master branch...\n')
+            if not 'master' in (x.strip().replace('* ', '') for x in git.branch().strip().split('\n')):
+              git.checkout('-t', 'origin/master')
             sys.stderr.write('Calling git flow init...\n')
             git.flow('init', '-d')
             # git flow assumes you'll have only local copies of feature
@@ -144,6 +147,8 @@ class Engine:
 
         if component_name in state.components_with_branch:
             exit_code, stdout, stderr = None, 'Branch %s already started.' % full_branch_name, None
+            git.checkout(full_branch_name)
+            git.pull('origin', full_branch_name)
         else:
             exit_code, stdout, stderr = git.flow(*args, with_extended_output=True, with_exceptions=False)
             if not exit_code:
