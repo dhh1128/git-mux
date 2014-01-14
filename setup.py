@@ -449,7 +449,7 @@ def update_app(nru):
         # we want to pull as normal user. Instead we run a shell command.
         with WorkingDir(config.BIN_FOLDER):
             exit_code, stdout, stderr = do('git pull', as_user=nru)
-            if stdout.find('lready up-to-date') == -1:
+            if not re.search('lready.*up.*to.*date', stdout):
                 print(stdout)
                 die('%s was out of date; re-run setup with new version.' % config.APP_NAME)
     print('no remote changes to worry about')
